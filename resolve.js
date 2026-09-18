@@ -424,42 +424,134 @@ function buildLocalPlaylist(playlist, mappings, baseUrl) {
     .join('\n');
 }
 
-async function startStreamGateway(resolution, { host = '127.0.0.1', port = 0 } = {}) {
-  const server = http.createServer(async (req, res) => {
+function createStreamGatewayHandler(resolution, gatewayId) {
+  return async function gatewayHandler(req, res) {
     try {
-      const requestUrl = new URL(req.url, 'http://localhost');
+      const requestUrl = new URL(
+        req.url,
+        `http://${req.headers.host || 'localhost'}`
+      );
+
+      const forwardedProto =
+        req.headers['x-forwarded-proto'] ||
+        (req.socket.encrypted ? 'https' : 'http');
+
+      const protocol =
+        String(forwardedProto).split(',')[0].trim();
+
+      const requestHost =
+        req.headers.host || '127.0.0.1';
+
+      const gatewayBase =
+        `${protocol}://${requestHost}/gateway/${gatewayId}`;
+
       if (requestUrl.pathname === '/stream.m3u8') {
-        const requestHost = req.headers.host || `127.0.0.1:${server.address().port}`;
-        const origin = `http://${requestHost}`;
-        const body = buildLocalPlaylist(resolution.playlist, resolution.mappings, origin);
-        res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
+        const body = buildLocalPlaylist(
+          resolution.playlist,
+          resolution.mappings,
+          gatewayBase
+        );
+
+        res.writeHead(200, {
+          'content-type': 'application/vnd.apple.mpegurl',
+          'access-control-allow-origin': '*',
+          'cache-control': 'no-store'
+        });
+
         return res.end(body);
       }
-      const match = requestUrl.pathname.match(/^\/segment\/(\d+)\.ts$/);
-      if (!match || !resolution.mappings[Number(match[1])]) { res.writeHead(404); return res.end('not found'); }
-      const directUrl = resolution.mappings[Number(match[1])][1];
+
+      const match =
+        requestUrl.pathname.match(/^\/segment\/(\d+)\.ts$/);
+
+      if (!match) {
+        res.writeHead(404);
+        return res.end('not found');
+      }
+
+      const index = Number(match[1]);
+      const mapping = resolution.mappings[index];
+
+      if (!mapping) {
+        res.writeHead(404);
+        return res.end('segment not found');
+      }
+
+      const directUrl = mapping[1];
+
       const upstreamHeaders = {
-        'user-agent': DEFAULT_UA, referer: resolution.embedUrl,
+        'user-agent': DEFAULT_UA,
+        referer: resolution.embedUrl,
         origin: new URL(resolution.embedUrl).origin
       };
-      if (req.headers.range) upstreamHeaders.range = req.headers.range;
-      const upstream = await fetch(directUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers: upstreamHeaders });
-      const headers = { 'content-type': upstream.headers.get('content-type') || 'video/mp2t', 'access-control-allow-origin': '*' };
-      for (const name of ['content-length', 'content-range', 'accept-ranges']) {
-        const value = upstream.headers.get(name); if (value) headers[name] = value;
+
+      if (req.headers.range) {
+        upstreamHeaders.range = req.headers.range;
       }
+
+      const upstream = await fetch(directUrl, {
+        method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+        headers: upstreamHeaders
+      });
+
+      const headers = {
+        'content-type':
+          upstream.headers.get('content-type') || 'video/mp2t',
+        'access-control-allow-origin': '*'
+      };
+
+      for (const name of [
+        'content-length',
+        'content-range',
+        'accept-ranges'
+      ]) {
+        const value = upstream.headers.get(name);
+
+        if (value) {
+          headers[name] = value;
+        }
+      }
+
       res.writeHead(upstream.status, headers);
-      if (req.method === 'HEAD' || !upstream.body) return res.end();
-      for await (const chunk of upstream.body) res.write(chunk);
+
+      if (req.method === 'HEAD' || !upstream.body) {
+        return res.end();
+      }
+
+      for await (const chunk of upstream.body) {
+        res.write(chunk);
+      }
+
       res.end();
     } catch (error) {
       debug('gateway error', error.message);
-      if (!res.headersSent) res.writeHead(502);
+
+      if (!res.headersSent) {
+        res.writeHead(502);
+      }
+
       res.end('upstream error');
     }
-  });
-  await new Promise((resolve, reject) => server.listen(port, host, resolve).once('error', reject));
-  return { server, streamUrl: `http://${host}:${server.address().port}/stream.m3u8` };
+  };
+}
+
+async function startStreamGateway(
+  resolution,
+  { host = '127.0.0.1', port = 0 } = {}
+) {
+  const handler = createStreamGatewayHandler(resolution);
+
+  const server = http.createServer(handler);
+
+  await new Promise((resolve, reject) =>
+    server.listen(port, host, resolve).once('error', reject)
+  );
+
+  return {
+    server,
+    streamUrl:
+      `http://${host}:${server.address().port}/stream.m3u8`
+  };
 }
 
 async function resolveHHPandaEpisode(episodeUrl, playerType = null, sharedBrowser = null) {
@@ -514,6 +606,7 @@ module.exports = {
   CookieJar, parseEpisode, resolveHHPandaPlayer, createStreamfreeSession,
   parseStreamfreeBootstrap, createStreamfreeBrowser,
   resolveStreamfreeSource, resolveHHPandaEpisode,
+  createStreamGatewayHandler,
   buildLocalPlaylist, startStreamGateway
 };
 

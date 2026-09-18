@@ -1,4 +1,6 @@
-const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
+const { addonBuilder, getRouter } = require('stremio-addon-sdk');
+const http = require('http');
+const crypto = require('crypto');
 const resolver = require('./resolve');
 
 const HHPANDA = 'https://hhpanda.st';
@@ -295,6 +297,8 @@ builder.defineMetaHandler(async ({ type, id }) => {
   }
 });
 
+const gatewayHandlers = new Map();
+
 builder.defineStreamHandler(async ({ type, id }) => {
   console.log(`[stream] ${type} ${id}`);
 
@@ -316,13 +320,29 @@ builder.defineStreamHandler(async ({ type, id }) => {
       `[stream] ${resolution.mappings.length} mappings resolved`
     );
 
-    gateway = await resolver.startStreamGateway(
-      resolution,
-      {
-        host: '127.0.0.1',
-        port: 0
-      }
+    const gatewayId = crypto.randomUUID();
+
+    gatewayHandlers.set(
+      gatewayId,
+      resolver.createStreamGatewayHandler(resolution, gatewayId)
     );
+
+    const PORT = Number(process.env.PORT || 7000);
+    const HOST =
+      process.env.RENDER === '1'
+        ? '0.0.0.0'
+        : '127.0.0.1';
+
+    const publicHost =
+      process.env.RENDER === '1'
+        ? (process.env.RENDER_EXTERNAL_HOSTNAME || `127.0.0.1:${PORT}`)
+        : `127.0.0.1:${PORT}`;
+
+    gateway = {
+      server: null,
+      streamUrl:
+        `http://${publicHost}/gateway/${gatewayId}/stream.m3u8`
+    };
 
     console.log(
       `[stream] gateway: ${gateway.streamUrl}`
@@ -353,13 +373,73 @@ builder.defineStreamHandler(async ({ type, id }) => {
   }
 });
 
-const PORT = 7000;
+const PORT = Number(process.env.PORT || 7000);
+const HOST =
+  process.env.RENDER === '1'
+    ? '0.0.0.0'
+    : '127.0.0.1';
 
-serveHTTP(builder.getInterface(), {
-  port: PORT
+const addonRouter = getRouter(builder.getInterface());
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const requestUrl = new URL(
+      req.url,
+      `http://${req.headers.host || 'localhost'}`
+    );
+
+    const gatewayMatch =
+      requestUrl.pathname.match(
+        /^\/gateway\/([^/]+)(\/.*)?$/
+      );
+
+    if (gatewayMatch) {
+      const gatewayId = gatewayMatch[1];
+      const gatewayHandler =
+        gatewayHandlers.get(gatewayId);
+
+      if (!gatewayHandler) {
+        res.writeHead(404);
+        return res.end('gateway not found');
+      }
+
+      const originalUrl = req.url;
+      const gatewayPath = gatewayMatch[2] || '/';
+
+      req.url =
+        gatewayPath +
+        (requestUrl.search || '');
+
+      try {
+        return await gatewayHandler(req, res);
+      } finally {
+        req.url = originalUrl;
+      }
+    }
+
+    return addonRouter(req, res, () => {
+      if (!res.headersSent) {
+        res.writeHead(404);
+        res.end('not found');
+      }
+    });
+  } catch (error) {
+    console.error('[server] ERROR:', error.message);
+
+    if (!res.headersSent) {
+      res.writeHead(500);
+    }
+
+    res.end('internal server error');
+  }
 });
 
-console.log('HHPanda addon running on port', PORT);
-console.log(
-  `HTTP addon accessible at: http://127.0.0.1:${PORT}/manifest.json`
-);
+server.listen(PORT, HOST, () => {
+  console.log(
+    `HHPanda addon running on ${HOST}:${PORT}`
+  );
+
+  console.log(
+    `HTTP addon accessible at: http://${HOST}:${PORT}/manifest.json`
+  );
+});
