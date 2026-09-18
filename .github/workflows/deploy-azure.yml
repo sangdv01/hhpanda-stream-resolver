@@ -67,4 +67,5 @@ jobs:
             --set-env-vars \
               NODE_ENV=production \
               HEADLESS=1 \
-              PORT=7000
+              PORT=7000 \
+              AZURE_PUBLIC_URL=https://hhpanda-resolver.purplecliff-189df27e.southeastasia.azurecontainerapps.io

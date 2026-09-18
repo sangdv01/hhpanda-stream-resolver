@@ -395,9 +395,10 @@ builder.defineStreamHandler(async ({ type, id }) => {
         : '0.0.0.0';
 
     const publicBaseUrl =
-      process.env.RENDER_EXTERNAL_HOSTNAME
+      process.env.AZURE_PUBLIC_URL ||
+      (process.env.RENDER_EXTERNAL_HOSTNAME
         ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`
-        : `http://0.0.0.0:${PORT}`;
+        : `http://0.0.0.0:${PORT}`);
 
     gateway = {
       server: null,
