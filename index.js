@@ -1,7 +1,49 @@
-const { addonBuilder, getRouter } = require('stremio-addon-sdk');
+﻿const { addonBuilder, getRouter } = require('stremio-addon-sdk');
 const http = require('http');
 const crypto = require('crypto');
 const resolver = require('./resolve');
+
+let sharedBrowser = null;
+let sharedBrowserPromise = null;
+
+async function getSharedBrowser() {
+  if (sharedBrowser && sharedBrowser.isConnected()) {
+    return sharedBrowser;
+  }
+
+  if (sharedBrowserPromise) {
+    return sharedBrowserPromise;
+  }
+
+  sharedBrowserPromise = (async () => {
+    console.log('[browser] launching shared Chromium...');
+
+    const started = Date.now();
+
+    try {
+      const browser = await resolver.createStreamfreeBrowser();
+
+      sharedBrowser = browser;
+
+      console.log(
+        `[browser] shared Chromium ready in ${Date.now() - started}ms`
+      );
+
+      return browser;
+    } catch (error) {
+      console.error(
+        '[browser] shared Chromium FAILED:',
+        error.message
+      );
+
+      throw error;
+    } finally {
+      sharedBrowserPromise = null;
+    }
+  })();
+
+  return sharedBrowserPromise;
+}
 
 const HHPANDA = 'https://hhpanda.st';
 
@@ -10,7 +52,7 @@ const builder = new addonBuilder({
   version: '1.2.1',
   name: 'HHPanda',
   logo: 'https://hhpanda.st/wp-content/uploads/2024/10/gia-thien-292-300x450.webp',
-  description: 'HHPanda • Hoạt hình Trung Quốc 3D • Thuyết Minh',
+  description: 'HHPanda â€¢ Hoáº¡t hÃ¬nh Trung Quá»‘c 3D â€¢ Thuyáº¿t Minh',
   resources: ['catalog', 'meta', 'stream'],
   types: ['series', 'movie'],
   catalogs: [
@@ -123,7 +165,7 @@ function parseTrending(html) {
   }
 
   if (!movies.length) {
-    throw new Error('Không tìm thấy card Trending HHPanda');
+    throw new Error('KhÃ´ng tÃ¬m tháº¥y card Trending HHPanda');
   }
 
   return movies;
@@ -170,7 +212,7 @@ async function fetchEpisodes(seriesUrl) {
 
     episodes.push({
       id: href,
-      title: text || `Tập ${episodeKey.replace('-', '.')}`,
+      title: text || `Táº­p ${episodeKey.replace('-', '.')}`,
       season: 1,
       episode: episodeNumber
     });
@@ -179,13 +221,13 @@ async function fetchEpisodes(seriesUrl) {
   episodes.sort((a, b) => a.episode - b.episode);
 
   console.log(
-    '[meta] HHPanda Thuyết Minh episodes:',
+    '[meta] HHPanda Thuyáº¿t Minh episodes:',
     episodes.length
   );
 
   if (!episodes.length) {
     throw new Error(
-      `Không tìm thấy episode Thuyết Minh (sv2): ${seriesUrl}`
+      `KhÃ´ng tÃ¬m tháº¥y episode Thuyáº¿t Minh (sv2): ${seriesUrl}`
     );
   }
 
@@ -219,7 +261,7 @@ async function fetchMeta(seriesUrl) {
     );
 
   const yearMatch =
-    html.match(/(?:Năm|Year)[^0-9]{0,30}(20\d{2})/i);
+    html.match(/(?:NÄƒm|Year)[^0-9]{0,30}(20\d{2})/i);
 
   const poster = posterMatch
     ? new URL(posterMatch[1], seriesUrl).href
@@ -236,10 +278,10 @@ async function fetchMeta(seriesUrl) {
     logo: poster,
     description: descriptionMatch
       ? descriptionMatch[1]
-      : `${title} • Hoạt hình Trung Quốc 3D • Thuyết Minh`,
+      : `${title} â€¢ Hoáº¡t hÃ¬nh Trung Quá»‘c 3D â€¢ Thuyáº¿t Minh`,
     releaseInfo: yearMatch ? yearMatch[1] : undefined,
     year: yearMatch ? Number(yearMatch[1]) : undefined,
-    genres: ['Hoạt Hình', 'Trung Quốc', '3D'],
+    genres: ['Hoáº¡t HÃ¬nh', 'Trung Quá»‘c', '3D'],
     videos: episodes
   };
 }
@@ -263,8 +305,8 @@ builder.defineCatalogHandler(async ({ type, id }) => {
         logo: movie.poster,
         background: movie.poster,
         description: movie.rating
-          ? `HHPanda • Đang thịnh hành • Rating ${movie.rating}`
-          : 'HHPanda • Đang thịnh hành'
+          ? `HHPanda â€¢ Äang thá»‹nh hÃ nh â€¢ Rating ${movie.rating}`
+          : 'HHPanda â€¢ Äang thá»‹nh hÃ nh'
       }))
     };
   } catch (error) {
@@ -310,10 +352,29 @@ builder.defineStreamHandler(async ({ type, id }) => {
   let gateway = null;
 
   try {
+    const streamStarted = Date.now();
+
+    const browserStarted = Date.now();
+    const browser = await getSharedBrowser();
+
+    console.log(
+      `[stream] shared browser ready in ${Date.now() - browserStarted}ms`
+    );
+
+    const resolveStarted = Date.now();
+
     resolution = await resolver.resolveHHPandaEpisode(
       id,
       'pro',
-      null
+      browser
+    );
+
+    console.log(
+      `[stream] resolver completed in ${Date.now() - resolveStarted}ms`
+    );
+
+    console.log(
+      `[stream] TOTAL resolve time: ${Date.now() - streamStarted}ms`
     );
 
     console.log(
@@ -331,12 +392,12 @@ builder.defineStreamHandler(async ({ type, id }) => {
     const HOST =
       process.env.RENDER === '1'
         ? '0.0.0.0'
-        : '127.0.0.1';
+        : '0.0.0.0';
 
     const publicBaseUrl =
       process.env.RENDER_EXTERNAL_HOSTNAME
         ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`
-        : `http://127.0.0.1:${PORT}`;
+        : `http://0.0.0.0:${PORT}`;
 
     gateway = {
       server: null,
@@ -351,8 +412,8 @@ builder.defineStreamHandler(async ({ type, id }) => {
     return {
       streams: [
         {
-          name: 'HHPanda • 1080P V2 • Lồng tiếng',
-          title: 'HHPanda • Thuyết Minh',
+          name: 'HHPanda â€¢ 1080P V2 â€¢ Lá»“ng tiáº¿ng',
+          title: 'HHPanda â€¢ Thuyáº¿t Minh',
           url: gateway.streamUrl,
           behaviorHints: {
             notWebReady: true
@@ -377,7 +438,7 @@ const PORT = Number(process.env.PORT || 7000);
 const HOST =
   process.env.RENDER_EXTERNAL_HOSTNAME
     ? '0.0.0.0'
-    : '127.0.0.1';
+    : '0.0.0.0';
 
 const addonRouter = getRouter(builder.getInterface());
 
@@ -385,7 +446,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const requestUrl = new URL(
       req.url,
-      `http://${req.headers.host || 'localhost'}`
+      `http://${req.headers.host || '0.0.0.0'}`
     );
 
     const gatewayMatch =
@@ -434,6 +495,25 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+const shutdown = async (signal) => {
+  console.log(`[server] ${signal} received, shutting down...`);
+
+  try {
+    if (sharedBrowser) {
+      await sharedBrowser.close();
+      sharedBrowser = null;
+    }
+  } catch (error) {
+    console.error('[browser] close error:', error.message);
+  }
+
+  server.close(() => {
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 server.listen(PORT, HOST, () => {
   console.log(
     `HHPanda addon running on ${HOST}:${PORT}`
@@ -443,3 +523,4 @@ server.listen(PORT, HOST, () => {
     `HTTP addon accessible at: http://${HOST}:${PORT}/manifest.json`
   );
 });
+
