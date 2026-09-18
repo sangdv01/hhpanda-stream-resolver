@@ -1,0 +1,19 @@
+{
+  "name": "hhpanda-stream-resolver",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "resolve": "node resolve.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "patchright": "^1.63.0",
+    "stremio-addon-sdk": "^1.6.10"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

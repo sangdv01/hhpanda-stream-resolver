@@ -1,0 +1,10 @@
+node_modules/
+*.PLAYBACK_OK_*
+*.before-*
+*.bak
+*.backup
+package.json.before-render
+.env
+.env.*
+npm-debug.log*
+.DS_Store
