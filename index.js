@@ -342,6 +342,8 @@ builder.defineMetaHandler(async ({ type, id }) => {
 const gatewayHandlers = new Map();
 
 builder.defineStreamHandler(async ({ type, id }) => {
+  id = decodeURIComponent(id);
+
   console.log(`[stream] ${type} ${id}`);
 
   if (type !== 'series') {
