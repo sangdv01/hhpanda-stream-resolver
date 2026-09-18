@@ -8,3 +8,4 @@ package.json.before-render
 .env.*
 npm-debug.log*
 .DS_Store
+patch-quality-debug.js
