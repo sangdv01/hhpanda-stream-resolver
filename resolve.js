@@ -90,18 +90,33 @@ function parseEpisode(html, episodeUrl) {
 }
 
 async function resolveHHPandaPlayer(episodeUrl, episode) {
+  const playerStarted = Date.now();
+
   const endpoint = new URL('/player/player.php', episodeUrl);
   endpoint.search = new URLSearchParams({
     action: 'dox_ajax_player', post_id: episode.postId,
     chapter_st: episode.chapter, type: episode.playerType, sv: episode.server
   });
+  const ajaxStarted = Date.now();
+
   const { text } = await requestText(endpoint, {
     stage: 'HHPanda player',
     headers: { referer: episodeUrl, 'x-requested-with': 'XMLHttpRequest' }
   });
+
+  console.log(
+    `[timing] HHPanda player AJAX       ${Date.now() - ajaxStarted}ms`
+  );
   const iframe = text.match(/<iframe\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
   if (!iframe) throw new StageError('HHPanda player', 'iframe URL was not present', { preview: preview(text) });
-  return new URL(decodeEntities(iframe), endpoint).href;
+  const playerResult =
+    new URL(decodeEntities(iframe), endpoint).href;
+
+  console.log(
+    `[timing] HHPanda player total     ${Date.now() - playerStarted}ms`
+  );
+
+  return playerResult;
 }
 
 function parseStreamfreeBootstrap(html, jar) {
@@ -120,12 +135,20 @@ function parseStreamfreeBootstrap(html, jar) {
 }
 
 async function createStreamfreeSession(embedUrl, episodeUrl) {
+  const bootstrapStarted = Date.now();
+
   const jar = new CookieJar();
   const { text } = await requestText(embedUrl, {
     stage: 'Streamfree bootstrap', jar,
     headers: { referer: episodeUrl, accept: 'text/html,application/xhtml+xml' }
   });
-  return { jar, bootstrap: parseStreamfreeBootstrap(text, jar) };
+  const bootstrap = parseStreamfreeBootstrap(text, jar);
+
+  console.log(
+    `[timing] Streamfree bootstrap    ${Date.now() - bootstrapStarted}ms`
+  );
+
+  return { jar, bootstrap };
 }
 
 function patchedBundle(body) {
@@ -155,6 +178,8 @@ async function resolveStreamfreeSource(
   embedUrl,
   sharedBrowser = null
 ) {
+  const sourceStarted = Date.now();
+
   const browser = sharedBrowser || await createStreamfreeBrowser();
   const ownsBrowser = !sharedBrowser;
   let context = null;
@@ -177,13 +202,24 @@ async function resolveStreamfreeSource(
 
     debug('opening real HHPanda page in Patchright');
 
+    const pageLoadStarted = Date.now();
+
     await page.goto(episodeUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 60_000
     });
 
+    console.log(
+      `[timing] Browser page load        ${Date.now() - pageLoadStarted}ms`
+    );
+
     const deadline = Date.now() + 45_000;
+    const iframeWaitStarted = Date.now();
+    const iframeSearchStarted = Date.now();
     let frame;
+    let iframeFoundAt = null;
+    let helperReadyAt = null;
+    let playlistReadyAt = null;
 
     while (Date.now() < deadline) {
       frame = page.frames().find(candidate =>
@@ -192,21 +228,96 @@ async function resolveStreamfreeSource(
         )
       );
 
-      if (frame) {
-        const ready = await frame.evaluate(() =>
-          document.documentElement.hasAttribute(
-            'data-decoded-playlist'
-          ) &&
-          document.documentElement.hasAttribute(
-            'data-helper-ready'
-          )
-        ).catch(() => false);
+      if (frame && iframeFoundAt === null) {
+        iframeFoundAt = Date.now();
+        console.log(
+          `[timing] Iframe found             ${iframeFoundAt - iframeSearchStarted}ms`
+        );
+      }
 
-        if (ready) break;
+      if (frame) {
+        const state = await frame.evaluate(() => ({
+          helperReady:
+            document.documentElement.hasAttribute(
+              'data-helper-ready'
+            ),
+          playlistReady:
+            document.documentElement.hasAttribute(
+              'data-decoded-playlist'
+            ),
+          bridgeReady:
+            Boolean(
+              globalThis.__sfOriginal &&
+              globalThis.__sfTemplate &&
+              globalThis.__sfState
+            )
+        })).catch(() => ({
+          helperReady: false,
+          playlistReady: false,
+          bridgeReady: false
+        }));
+
+        if (
+          state.playlistReady &&
+          !state.bridgeReady
+        ) {
+          console.log(
+            '[timing] Playlist exists but bridge not ready yet'
+          );
+        }
+
+        if (
+          state.playlistReady &&
+          state.bridgeReady
+        ) {
+          console.log(
+            '[timing] Playlist + bridge ready'
+          );
+        }
+
+        if (state.helperReady && helperReadyAt === null) {
+          helperReadyAt = Date.now();
+
+          console.log(
+            `[timing] Helper ready             ${helperReadyAt - iframeSearchStarted}ms`
+          );
+        }
+
+        if (state.playlistReady && playlistReadyAt === null) {
+          playlistReadyAt = Date.now();
+
+          console.log(
+            `[timing] Playlist ready           ${playlistReadyAt - iframeSearchStarted}ms`
+          );
+        }
+
+        if (state.helperReady && state.playlistReady) {
+          break;
+        }
       }
 
       await page.waitForTimeout(250);
     }
+
+    console.log(
+      `[timing] Wait iframe              ${Date.now() - iframeWaitStarted}ms`
+    );
+
+    console.log(
+      `[timing] Iframe ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ helper           ${
+        helperReadyAt !== null && iframeFoundAt !== null
+          ? helperReadyAt - iframeFoundAt
+          : -1
+      }ms`
+    );
+
+    console.log(
+      `[timing] Helper ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ playlist         ${
+        playlistReadyAt !== null && helperReadyAt !== null
+          ? playlistReadyAt - helperReadyAt
+          : -1
+      }ms`
+    );
 
     if (!frame) {
       throw new StageError(
@@ -214,6 +325,8 @@ async function resolveStreamfreeSource(
         'embed frame did not load'
       );
     }
+
+    const decodeStarted = Date.now();
 
     const result = await frame.evaluate(async () => {
       const playlist =
@@ -245,36 +358,60 @@ async function resolveStreamfreeSource(
           virtualUrl
         );
 
-        document.dispatchEvent(
-          new Event('streamfree-decode-fragment')
-        );
+        const directUrl = await new Promise((resolve, reject) => {
+          const root = document.documentElement;
 
-        for (
-          let attempt = 0;
-          attempt < 200 &&
-          !document.documentElement.hasAttribute(
-            'data-decoded-url'
-          );
-          attempt++
-        ) {
-          await new Promise(resolve =>
-            setTimeout(resolve, 10)
-          );
-        }
+          let settled = false;
 
-        const directUrl =
-          document.documentElement.getAttribute(
-            'data-decoded-url'
-          );
+          const finish = (error, value) => {
+            if (settled) return;
 
-        if (
-          !directUrl ||
-          directUrl.startsWith('ERROR:')
-        ) {
-          throw new Error(
-            `segment transform failed: ${directUrl || 'timeout'}`
+            settled = true;
+            observer.disconnect();
+            clearTimeout(timeoutId);
+
+            if (error) {
+              reject(error);
+            } else {
+              resolve(value);
+            }
+          };
+
+          const observer = new MutationObserver(() => {
+            const value =
+              root.getAttribute('data-decoded-url');
+
+            if (!value) return;
+
+            if (value.startsWith('ERROR:')) {
+              finish(
+                new Error(
+                  `segment transform failed: ${value}`
+                )
+              );
+              return;
+            }
+
+            finish(null, value);
+          });
+
+          observer.observe(root, {
+            attributes: true,
+            attributeFilter: ['data-decoded-url']
+          });
+
+          const timeoutId = setTimeout(() => {
+            finish(
+              new Error(
+                'segment transform failed: timeout'
+              )
+            );
+          }, 5000);
+
+          document.dispatchEvent(
+            new Event('streamfree-decode-fragment')
           );
-        }
+        });
 
         mappings.push([
           virtualUrl,
@@ -343,7 +480,7 @@ async function resolveStreamfreeSource(
       );
       console.log('');
 
-      return {
+    return {
         playlist,
         mappings,
         qualityLevels,
@@ -396,6 +533,13 @@ async function resolveStreamfreeSource(
       'media segments'
     );
 
+    console.log(
+      `[timing] Extract/decode           ${Date.now() - decodeStarted}ms`
+    );
+
+    console.log(
+      `[timing] Streamfree source total  ${Date.now() - sourceStarted}ms`
+    );
     return result;
   } catch (error) {
     if (error instanceof StageError) {
@@ -563,7 +707,7 @@ async function resolveHHPandaEpisode(episodeUrl, playerType = null, sharedBrowse
     episode.playerType = playerType;
   }
 
-  // Force server 2 = Lồng tiếng
+  // Force server 2 = LÃƒÂ¡Ã‚Â»Ã¢â‚¬Å“ng tiÃƒÂ¡Ã‚ÂºÃ‚Â¿ng
   episode.server = 2;
 
   debug('episode metadata', episode);
@@ -615,3 +759,5 @@ if (require.main === module) main().catch(error => {
   console.error(JSON.stringify({ error: error.message, stage: error.stage, ...details }, null, 2));
   process.exitCode = 1;
 });
+
+module.exports.createStreamfreeBrowser = createStreamfreeBrowser;
