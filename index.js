@@ -333,15 +333,15 @@ builder.defineStreamHandler(async ({ type, id }) => {
         ? '0.0.0.0'
         : '127.0.0.1';
 
-    const publicHost =
-      process.env.RENDER === '1'
-        ? (process.env.RENDER_EXTERNAL_HOSTNAME || `127.0.0.1:${PORT}`)
-        : `127.0.0.1:${PORT}`;
+    const publicBaseUrl =
+      process.env.RENDER_EXTERNAL_HOSTNAME
+        ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`
+        : `http://127.0.0.1:${PORT}`;
 
     gateway = {
       server: null,
       streamUrl:
-        `http://${publicHost}/gateway/${gatewayId}/stream.m3u8`
+        `${publicBaseUrl}/gateway/${gatewayId}/stream.m3u8`
     };
 
     console.log(
@@ -375,7 +375,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
 
 const PORT = Number(process.env.PORT || 7000);
 const HOST =
-  process.env.RENDER === '1'
+  process.env.RENDER_EXTERNAL_HOSTNAME
     ? '0.0.0.0'
     : '127.0.0.1';
 
