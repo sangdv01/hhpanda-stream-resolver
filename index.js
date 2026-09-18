@@ -1,4 +1,4 @@
-﻿const { addonBuilder, getRouter } = require('stremio-addon-sdk');
+const { addonBuilder, getRouter } = require('stremio-addon-sdk');
 const http = require('http');
 const crypto = require('crypto');
 const resolver = require('./resolve');
@@ -52,7 +52,7 @@ const builder = new addonBuilder({
   version: '1.2.1',
   name: 'HHPanda',
   logo: 'https://hhpanda.st/wp-content/uploads/2024/10/gia-thien-292-300x450.webp',
-  description: 'HHPanda â€¢ Hoáº¡t hÃ¬nh Trung Quá»‘c 3D â€¢ Thuyáº¿t Minh',
+  description: 'HHPanda • Hoạt hình Trung Quốc 3D • Thuyết Minh',
   resources: ['catalog', 'meta', 'stream'],
   types: ['series', 'movie'],
   catalogs: [
