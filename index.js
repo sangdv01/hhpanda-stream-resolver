@@ -2,6 +2,19 @@ const { addonBuilder, getRouter } = require('stremio-addon-sdk');
 const http = require('http');
 const crypto = require('crypto');
 const resolver = require('./resolve');
+const yan = require('./yanhh3d');
+
+const yanStreamMap = new Map();
+
+// Dọn dẹp cache stream YanHH3D sau mỗi 30 phút
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, item] of yanStreamMap.entries()) {
+    if (now - item.createdAt > 3 * 3600 * 1000) {
+      yanStreamMap.delete(id);
+    }
+  }
+}, 30 * 60 * 1000);
 
 let sharedBrowser = null;
 let sharedBrowserPromise = null;
@@ -49,17 +62,22 @@ const HHPANDA = 'https://hhpanda.st';
 
 const builder = new addonBuilder({
   id: 'community.hhpanda',
-  version: '1.2.1',
-  name: 'HHPanda',
-  logo: 'https://hhpanda.st/wp-content/uploads/2024/10/gia-thien-292-300x450.webp',
-  description: 'HHPanda • Hoạt hình Trung Quốc 3D • Thuyết Minh',
+  version: '1.3.0',
+  name: 'HHPanda & YanHH3D',
+  logo: 'https://yanhh3d.men/storage/settings/January2026/logo.png',
+  description: 'Hoạt hình Trung Quốc 3D • HHPanda & YanHH3D (1080P & 4K • Thuyết Minh & Vietsub)',
   resources: ['catalog', 'meta', 'stream'],
   types: ['series', 'movie'],
   catalogs: [
     {
       type: 'series',
       id: 'hhpanda',
-      name: 'HHPanda'
+      name: 'HHPanda (Thịnh hành)'
+    },
+    {
+      type: 'series',
+      id: 'yanhh3d',
+      name: 'YanHH3D (Hoạt Hình 3D)'
     }
   ]
 });
@@ -289,30 +307,55 @@ async function fetchMeta(seriesUrl) {
 builder.defineCatalogHandler(async ({ type, id }) => {
   console.log(`[catalog] ${type} ${id}`);
 
-  if (type !== 'series' || id !== 'hhpanda') {
+  if (type !== 'series') {
     return { metas: [] };
   }
 
-  try {
-    const movies = await fetchCatalog();
-
-    return {
-      metas: movies.map(movie => ({
-        id: movie.id,
-        type: 'series',
-        name: movie.name,
-        poster: movie.poster,
-        logo: movie.poster,
-        background: movie.poster,
-        description: movie.rating
-          ? `HHPanda • Đang thịnh hành • Rating ${movie.rating}`
-          : 'HHPanda • Đang thịnh hành'
-      }))
-    };
-  } catch (error) {
-    console.error('[catalog] FAILED:', error.message);
-    return { metas: [] };
+  // Danh mục YanHH3D
+  if (id === 'yanhh3d') {
+    try {
+      const movies = await yan.fetchTrendingYan();
+      return {
+        metas: movies.map(movie => ({
+          id: movie.id,
+          type: 'series',
+          name: movie.name,
+          poster: movie.poster,
+          logo: movie.poster,
+          background: movie.poster,
+          description: movie.description
+        }))
+      };
+    } catch (error) {
+      console.error('[catalog yanhh3d] FAILED:', error.message);
+      return { metas: [] };
+    }
   }
+
+  // Danh mục HHPanda
+  if (id === 'hhpanda') {
+    try {
+      const movies = await fetchCatalog();
+      return {
+        metas: movies.map(movie => ({
+          id: movie.id,
+          type: 'series',
+          name: movie.name,
+          poster: movie.poster,
+          logo: movie.poster,
+          background: movie.poster,
+          description: movie.rating
+            ? `HHPanda • Đang thịnh hành • Rating ${movie.rating}`
+            : 'HHPanda • Đang thịnh hành'
+        }))
+      };
+    } catch (error) {
+      console.error('[catalog hhpanda] FAILED:', error.message);
+      return { metas: [] };
+    }
+  }
+
+  return { metas: [] };
 });
 
 builder.defineMetaHandler(async ({ type, id }) => {
@@ -324,9 +367,13 @@ builder.defineMetaHandler(async ({ type, id }) => {
   }
 
   try {
-    const meta = await fetchMeta(id);
-
-    return { meta };
+    if (id.includes('yanhh3d.men')) {
+      const meta = await yan.fetchMetaYan(id);
+      return { meta };
+    } else {
+      const meta = await fetchMeta(id);
+      return { meta };
+    }
   } catch (error) {
     console.error('[meta] FAILED:', error.message);
 
@@ -351,12 +398,49 @@ builder.defineStreamHandler(async ({ type, id }) => {
     return { streams: [] };
   }
 
+  const PORT = Number(process.env.PORT || 7000);
+  const publicBaseUrl =
+    process.env.AZURE_PUBLIC_URL ||
+    (process.env.RENDER_EXTERNAL_HOSTNAME
+      ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`
+      : `http://0.0.0.0:${PORT}`);
+
+  // NGUỒN 1: YanHH3D (1080P & 4K • Thuyết Minh & Vietsub)
+  if (id.includes('yanhh3d.men')) {
+    try {
+      const yanStreams = await yan.resolveYanStreams(id);
+      const outputStreams = [];
+
+      for (const s of yanStreams) {
+        const streamId = crypto.randomUUID();
+        yanStreamMap.set(streamId, {
+          playlistUrl: s.playlistUrl,
+          createdAt: Date.now()
+        });
+
+        outputStreams.push({
+          name: s.name,
+          title: s.title,
+          url: `${publicBaseUrl}/gateway/yan/${streamId}/stream.m3u8`,
+          behaviorHints: {
+            notWebReady: true
+          }
+        });
+      }
+
+      return { streams: outputStreams };
+    } catch (err) {
+      console.error('[stream yanhh3d] FAILED:', err.message);
+      return { streams: [] };
+    }
+  }
+
+  // NGUỒN 2: HHPanda (1080P • Thuyết Minh)
   let resolution = null;
   let gateway = null;
 
   try {
     const streamStarted = Date.now();
-
     const browserStarted = Date.now();
     const browser = await getSharedBrowser();
 
@@ -391,18 +475,6 @@ builder.defineStreamHandler(async ({ type, id }) => {
       resolver.createStreamGatewayHandler(resolution, gatewayId)
     );
 
-    const PORT = Number(process.env.PORT || 7000);
-    const HOST =
-      process.env.RENDER === '1'
-        ? '0.0.0.0'
-        : '0.0.0.0';
-
-    const publicBaseUrl =
-      process.env.AZURE_PUBLIC_URL ||
-      (process.env.RENDER_EXTERNAL_HOSTNAME
-        ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`
-        : `http://0.0.0.0:${PORT}`);
-
     gateway = {
       server: null,
       streamUrl:
@@ -416,8 +488,8 @@ builder.defineStreamHandler(async ({ type, id }) => {
     return {
       streams: [
         {
-          name: 'HHPanda • 1080P V2 • Lồng tiếng',
-          title: 'HHPanda • Thuyết Minh',
+          name: '[HHPanda]\n1080P',
+          title: 'HHPanda • 1080P • Thuyết Minh',
           url: gateway.streamUrl,
           behaviorHints: {
             notWebReady: true
@@ -426,7 +498,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
       ]
     };
   } catch (error) {
-    console.error('[stream] FAILED:', error.message);
+    console.error('[stream hhpanda] FAILED:', error.message);
 
     if (gateway?.server) {
       gateway.server.close();
@@ -452,6 +524,108 @@ const server = http.createServer(async (req, res) => {
       req.url,
       `http://${req.headers.host || '0.0.0.0'}`
     );
+
+    // ROUTE GATEWAY CHO YANHH3D:
+    // 1. Phục vụ Playlist: /gateway/yan/:streamId/stream.m3u8
+    const yanM3u8Match = requestUrl.pathname.match(/^\/gateway\/yan\/([^/]+)\/stream\.m3u8$/);
+    if (yanM3u8Match) {
+      const streamId = yanM3u8Match[1];
+      const streamInfo = yanStreamMap.get(streamId);
+      if (!streamInfo) {
+        res.writeHead(404, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });
+        return res.end('stream not found or expired');
+      }
+
+      const publicBase =
+        process.env.AZURE_PUBLIC_URL ||
+        (process.env.RENDER_EXTERNAL_HOSTNAME
+          ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`
+          : `http://${req.headers.host || '0.0.0.0'}`);
+
+      try {
+        const plRes = await fetch(streamInfo.playlistUrl, {
+          headers: {
+            'Referer': 'https://yanhh3d.men/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36'
+          }
+        });
+
+        if (!plRes.ok) {
+          res.writeHead(502, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });
+          return res.end('upstream playlist error');
+        }
+
+        const plText = await plRes.text();
+        const rewritten = plText.split(/\r?\n/).map(line => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            return `${publicBase}/gateway/yan/segment.ts?u=${encodeURIComponent(trimmed)}`;
+          }
+          return line;
+        }).join('\n');
+
+        res.writeHead(200, {
+          'content-type': 'application/vnd.apple.mpegurl',
+          'access-control-allow-origin': '*',
+          'cache-control': 'no-store'
+        });
+        return res.end(rewritten);
+      } catch (err) {
+        console.error('[gateway yan m3u8] error:', err.message);
+        res.writeHead(500, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });
+        return res.end('internal gateway error');
+      }
+    }
+
+    // 2. Phục vụ Segment MPEG-TS: /gateway/yan/segment.ts?u=...
+    if (requestUrl.pathname === '/gateway/yan/segment.ts') {
+      const targetUrl = requestUrl.searchParams.get('u');
+      if (!targetUrl) {
+        res.writeHead(400, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });
+        return res.end('missing u parameter');
+      }
+
+      try {
+        const upstreamHeaders = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36',
+          'Referer': 'https://yanhh3d.men/'
+        };
+        if (req.headers.range) {
+          upstreamHeaders.range = req.headers.range;
+        }
+
+        const segRes = await fetch(targetUrl, {
+          method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+          headers: upstreamHeaders
+        });
+
+        if (!segRes.ok) {
+          res.writeHead(segRes.status, { 'access-control-allow-origin': '*' });
+          return res.end();
+        }
+
+        const segBuf = Buffer.from(await segRes.arrayBuffer());
+        const offset = yan.findTsSyncOffset(segBuf);
+        const videoChunk = segBuf.slice(offset);
+
+        res.writeHead(200, {
+          'content-type': 'video/mp2t',
+          'access-control-allow-origin': '*',
+          'content-length': videoChunk.length,
+          'cache-control': 'public, max-age=86400'
+        });
+
+        if (req.method === 'HEAD') {
+          return res.end();
+        }
+
+        return res.end(videoChunk);
+      } catch (err) {
+        console.error('[gateway yan segment] error:', err.message);
+        res.writeHead(500, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });
+        return res.end('failed to load segment');
+      }
+    }
 
     const gatewayMatch =
       requestUrl.pathname.match(
