@@ -82,6 +82,7 @@ async function fetchTrendingYan() {
  * Lấy chi tiết phim và danh sách tập
  */
 async function fetchMetaYan(seriesUrl) {
+  seriesUrl = String(seriesUrl || '').replace(/^https?:\/+(?=[^/])/, 'https://');
   console.log('[yanhh3d] fetching meta for:', seriesUrl);
   const html = await fetchHTML(seriesUrl);
 
@@ -206,11 +207,12 @@ function findTsSyncOffset(buf) {
  * Phân giải tất cả các luồng 1080p và 4K (Thuyết Minh + Vietsub) cho một tập phim
  */
 async function resolveYanStreams(episodeUrl) {
+  episodeUrl = String(episodeUrl || '').replace(/^https?:\/+(?=[^/])/, 'https://');
   console.log('[yanhh3d] resolving streams for:', episodeUrl);
 
   const cleanUrl = episodeUrl.replace('/sever2/', '/');
   const tmUrl = cleanUrl;
-  const subUrl = cleanUrl.replace('https://yanhh3d.men/', 'https://yanhh3d.men/sever2/');
+  const subUrl = cleanUrl.replace(/https?:\/\/[^/]+\//, `${BASE_URL}/sever2/`);
 
   // Tải đồng thời cả 2 trang Thuyết Minh và Vietsub
   const [tmHtmlRes, subHtmlRes] = await Promise.allSettled([
