@@ -309,7 +309,7 @@ async function resolveStreamfreeSource(
     );
 
     console.log(
-      `[timing] Iframe ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ helper           ${
+      `[timing] Iframe -> helper           ${
         helperReadyAt !== null && iframeFoundAt !== null
           ? helperReadyAt - iframeFoundAt
           : -1
@@ -317,7 +317,7 @@ async function resolveStreamfreeSource(
     );
 
     console.log(
-      `[timing] Helper ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ playlist         ${
+      `[timing] Helper -> playlist         ${
         playlistReadyAt !== null && helperReadyAt !== null
           ? playlistReadyAt - helperReadyAt
           : -1
@@ -712,7 +712,7 @@ async function resolveHHPandaEpisode(episodeUrl, playerType = null, sharedBrowse
     episode.playerType = playerType;
   }
 
-  // Force server 2 = LÃƒÂ¡Ã‚Â»Ã¢â‚¬Å“ng tiÃƒÂ¡Ã‚ÂºÃ‚Â¿ng
+  // Force server 2 = Thuyết Minh / Lồng tiếng
   episode.server = 2;
 
   debug('episode metadata', episode);

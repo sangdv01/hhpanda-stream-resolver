@@ -165,7 +165,7 @@ function parseTrending(html) {
   }
 
   if (!movies.length) {
-    throw new Error('KhÃ´ng tÃ¬m tháº¥y card Trending HHPanda');
+    throw new Error('Không tìm thấy card Trending HHPanda');
   }
 
   return movies;
@@ -212,7 +212,7 @@ async function fetchEpisodes(seriesUrl) {
 
     episodes.push({
       id: href,
-      title: text || `Táº­p ${episodeKey.replace('-', '.')}`,
+      title: text || `Tập ${episodeKey.replace('-', '.')}`,
       season: 1,
       episode: episodeNumber
     });
@@ -221,13 +221,13 @@ async function fetchEpisodes(seriesUrl) {
   episodes.sort((a, b) => a.episode - b.episode);
 
   console.log(
-    '[meta] HHPanda Thuyáº¿t Minh episodes:',
+    '[meta] HHPanda Thuyết Minh episodes:',
     episodes.length
   );
 
   if (!episodes.length) {
     throw new Error(
-      `KhÃ´ng tÃ¬m tháº¥y episode Thuyáº¿t Minh (sv2): ${seriesUrl}`
+      `Không tìm thấy episode Thuyết Minh (sv2): ${seriesUrl}`
     );
   }
 
@@ -261,7 +261,7 @@ async function fetchMeta(seriesUrl) {
     );
 
   const yearMatch =
-    html.match(/(?:NÄƒm|Year)[^0-9]{0,30}(20\d{2})/i);
+    html.match(/(?:Năm|Year)[^0-9]{0,30}(20\d{2})/i);
 
   const poster = posterMatch
     ? new URL(posterMatch[1], seriesUrl).href
@@ -278,10 +278,10 @@ async function fetchMeta(seriesUrl) {
     logo: poster,
     description: descriptionMatch
       ? descriptionMatch[1]
-      : `${title} â€¢ Hoáº¡t hÃ¬nh Trung Quá»‘c 3D â€¢ Thuyáº¿t Minh`,
+      : `${title} • Hoạt hình Trung Quốc 3D • Thuyết Minh`,
     releaseInfo: yearMatch ? yearMatch[1] : undefined,
     year: yearMatch ? Number(yearMatch[1]) : undefined,
-    genres: ['Hoáº¡t HÃ¬nh', 'Trung Quá»‘c', '3D'],
+    genres: ['Hoạt Hình', 'Trung Quốc', '3D'],
     videos: episodes
   };
 }
@@ -305,8 +305,8 @@ builder.defineCatalogHandler(async ({ type, id }) => {
         logo: movie.poster,
         background: movie.poster,
         description: movie.rating
-          ? `HHPanda â€¢ Äang thá»‹nh hÃ nh â€¢ Rating ${movie.rating}`
-          : 'HHPanda â€¢ Äang thá»‹nh hÃ nh'
+          ? `HHPanda • Đang thịnh hành • Rating ${movie.rating}`
+          : 'HHPanda • Đang thịnh hành'
       }))
     };
   } catch (error) {
@@ -416,8 +416,8 @@ builder.defineStreamHandler(async ({ type, id }) => {
     return {
       streams: [
         {
-          name: 'HHPanda â€¢ 1080P V2 â€¢ Lá»“ng tiáº¿ng',
-          title: 'HHPanda â€¢ Thuyáº¿t Minh',
+          name: 'HHPanda • 1080P V2 • Lồng tiếng',
+          title: 'HHPanda • Thuyết Minh',
           url: gateway.streamUrl,
           behaviorHints: {
             notWebReady: true
