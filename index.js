@@ -558,10 +558,15 @@ const server = http.createServer(async (req, res) => {
         const plText = await plRes.text();
         const rewritten = plText.split(/\r?\n/).map(line => {
           const trimmed = line.trim();
-          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-            return `${publicBase}/gateway/yan/segment.ts?u=${encodeURIComponent(trimmed)}`;
+          if (!trimmed || trimmed.startsWith('#')) {
+            return line;
           }
-          return line;
+          try {
+            const absUrl = new URL(trimmed, streamInfo.playlistUrl).href;
+            return `${publicBase}/gateway/yan/segment.ts?u=${encodeURIComponent(absUrl)}`;
+          } catch (e) {
+            return line;
+          }
         }).join('\n');
 
         res.writeHead(200, {
@@ -590,9 +595,6 @@ const server = http.createServer(async (req, res) => {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36',
           'Referer': 'https://yanhh3d.men/'
         };
-        if (req.headers.range) {
-          upstreamHeaders.range = req.headers.range;
-        }
 
         const segRes = await fetch(targetUrl, {
           method: req.method === 'HEAD' ? 'HEAD' : 'GET',
@@ -608,18 +610,36 @@ const server = http.createServer(async (req, res) => {
         const offset = yan.findTsSyncOffset(segBuf);
         const videoChunk = segBuf.slice(offset);
 
-        res.writeHead(200, {
+        let statusCode = 200;
+        let responseChunk = videoChunk;
+        const resHeaders = {
           'content-type': 'video/mp2t',
           'access-control-allow-origin': '*',
-          'content-length': videoChunk.length,
+          'accept-ranges': 'bytes',
           'cache-control': 'public, max-age=86400'
-        });
+        };
+
+        if (req.headers.range) {
+          const rangeMatch = req.headers.range.match(/bytes=(\d+)-(\d*)/);
+          if (rangeMatch) {
+            const start = parseInt(rangeMatch[1], 10);
+            const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : videoChunk.length - 1;
+            if (start < videoChunk.length) {
+              statusCode = 206;
+              responseChunk = videoChunk.slice(start, end + 1);
+              resHeaders['content-range'] = `bytes ${start}-${end}/${videoChunk.length}`;
+            }
+          }
+        }
+
+        resHeaders['content-length'] = responseChunk.length;
+        res.writeHead(statusCode, resHeaders);
 
         if (req.method === 'HEAD') {
           return res.end();
         }
 
-        return res.end(videoChunk);
+        return res.end(responseChunk);
       } catch (err) {
         console.error('[gateway yan segment] error:', err.message);
         res.writeHead(500, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });

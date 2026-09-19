@@ -98,19 +98,19 @@ async function fetchMetaYan(seriesUrl) {
   const description = descMatch ? getText(descMatch[1]) : `${title} • Hoạt hình Trung Quốc 3D (YanHH3D)`;
 
   // Tìm link trang xem tập đầu tiên để lấy danh sách toàn bộ các tập
-  const watchMatch = html.match(/href=["'](https:\/\/yanhh3d\.men\/[^"']*\/tap-\d+[^"']*)["']/i);
+  const watchMatch = html.match(/href=["']((?:https:\/\/yanhh3d\.men)?\/[^"']*\/tap-\d+[^"']*)["']/i);
   let episodes = [];
 
   if (watchMatch) {
-    const watchUrl = watchMatch[1];
+    const watchUrl = watchMatch[1].startsWith('http') ? watchMatch[1] : `${BASE_URL}${watchMatch[1]}`;
     const watchHtml = await fetchHTML(watchUrl);
 
-    const epRegex = /<a\b[^>]*href=["'](https:\/\/yanhh3d\.men\/[^"']*\/tap-(\d+))["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const epRegex = /<a\b[^>]*href=["']((?:https:\/\/yanhh3d\.men)?\/[^"']*\/tap-(\d+))["'][^>]*>([\s\S]*?)<\/a>/gi;
     const seen = new Set();
     let m;
 
     while ((m = epRegex.exec(watchHtml)) !== null) {
-      const epUrl = m[1];
+      const epUrl = m[1].startsWith('http') ? m[1] : `${BASE_URL}${m[1]}`;
       const epNum = Number(m[2]);
       if (!seen.has(epNum)) {
         seen.add(epNum);
@@ -142,19 +142,48 @@ async function fetchMetaYan(seriesUrl) {
 }
 
 /**
- * Trích xuất link manifest plain pU từ iframe rptstream
+ * Trích xuất link manifest plain pU hoặc stream m3u8 từ iframe rptstream
  */
 async function resolveEmbedPlayer(embedUrl) {
+  if (!embedUrl) return null;
   try {
     const res = await fetch(embedUrl, {
       headers: { 'Referer': BASE_URL, 'User-Agent': DEFAULT_UA }
     });
     if (!res.ok) return null;
     const html = await res.text();
+
+    // 1. data-obf (Base64 JSON)
     const obfMatch = html.match(/data-obf=["']([^"']+)["']/i);
-    if (!obfMatch) return null;
-    const data = JSON.parse(Buffer.from(obfMatch[1], 'base64').toString('utf8'));
-    return data.pU || null;
+    if (obfMatch) {
+      try {
+        const data = JSON.parse(Buffer.from(obfMatch[1], 'base64').toString('utf8'));
+        if (data.pU || data.sU) return data.pU || data.sU;
+      } catch (e) {}
+    }
+
+    // 2. data-stream-url
+    const streamUrlMatch = html.match(/data-stream-url=["']([^"']+)["']/i);
+    if (streamUrlMatch && streamUrlMatch[1].includes('.m3u8')) {
+      return streamUrlMatch[1];
+    }
+
+    // 3. window.streamURL / streamUrl
+    const winMatch = html.match(/(?:window\.)?stream(?:URL|Url)\s*=\s*["']([^"']+\.m3u8[^"']*)["']/i);
+    if (winMatch) return winMatch[1];
+
+    // 4. var cccc = "..." or file: "..."
+    const ccccMatch = html.match(/var\s+\w+\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
+    if (ccccMatch) return ccccMatch[1];
+
+    const fileMatch = html.match(/["']?file["']?\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
+    if (fileMatch) return fileMatch[1];
+
+    // 5. Fallback link m3u8 chứa /stream/ hoặc /stream-plain
+    const streamM3u8Match = html.match(/["'](https?:\/\/[^"']*\/stream(?:-plain)?\/?[^"']*)["']/i);
+    if (streamM3u8Match) return streamM3u8Match[1];
+
+    return null;
   } catch (err) {
     console.error('[yanhh3d] resolveEmbedPlayer error:', err.message);
     return null;
@@ -196,29 +225,33 @@ async function resolveYanStreams(episodeUrl) {
     const btns = html.match(/<[^>]+id=["']sv_[^"']+["'][^>]*>[\s\S]*?<\/[^>]+>/gi) || [];
     let link4k = null;
     let link1080 = null;
+    let linkHd = null;
+    let linkOther = null;
 
     for (const b of btns) {
       const text = b.replace(/<[^>]+>/g, '').trim();
       const srcMatch = b.match(/data-src=["']([^"']+)["']/i);
       if (!srcMatch) continue;
       const src = srcMatch[1];
+      const upper = text.toUpperCase();
 
-      // Ưu tiên 4K chính (LINK5), sau đó LINK6
-      if (text === '4K' && !link4k) {
-        link4k = src;
-      } else if (text === '4K-' && !link4k) {
-        link4k = src;
+      // Chỉ chọn server rptstream hoặc có link m3u8
+      if (!src.includes('rptstream.xyz') && !src.includes('.m3u8')) {
+        continue;
       }
 
-      // Ưu tiên 1080 chính (LINK1), sau đó LINK4
-      if (text === '1080' && !link1080) {
-        link1080 = src;
-      } else if (text === '1080-' && !link1080) {
-        link1080 = src;
+      if (upper.includes('4K') || upper.includes('2160')) {
+        if (!link4k || text === '4K') link4k = src;
+      } else if (upper.includes('1080')) {
+        if (!link1080 || text === '1080') link1080 = src;
+      } else if (upper.includes('HD') || upper.includes('720')) {
+        if (!linkHd || text === 'HD') linkHd = src;
+      } else {
+        if (!linkOther) linkOther = src;
       }
     }
 
-    return { link4k, link1080 };
+    return { link4k, link1080, linkHd, linkOther };
   }
 
   const tmButtons = parseQualityButtons(tmHtml);
@@ -272,6 +305,34 @@ async function resolveYanStreams(episodeUrl) {
       title: 'YanHH3D • 1080P • Phụ Đề (Vietsub)',
       playlistUrl: sub1080
     });
+  }
+
+  // Fallback nếu không có 4K hoặc 1080P (như trailer hoặc tập phim cũ chỉ có bản HD)
+  if (results.length === 0) {
+    const [tmHd, subHd] = await Promise.all([
+      tmButtons.linkHd ? resolveEmbedPlayer(tmButtons.linkHd) : (tmButtons.linkOther ? resolveEmbedPlayer(tmButtons.linkOther) : Promise.resolve(null)),
+      subButtons.linkHd ? resolveEmbedPlayer(subButtons.linkHd) : (subButtons.linkOther ? resolveEmbedPlayer(subButtons.linkOther) : Promise.resolve(null))
+    ]);
+
+    if (tmHd) {
+      results.push({
+        quality: 'HD',
+        type: 'Thuyết Minh',
+        name: '[YanHH3D]\nHD',
+        title: 'YanHH3D • HD • Thuyết Minh',
+        playlistUrl: tmHd
+      });
+    }
+
+    if (subHd) {
+      results.push({
+        quality: 'HD',
+        type: 'Phụ Đề',
+        name: '[YanHH3D]\nHD',
+        title: 'YanHH3D • HD • Phụ Đề (Vietsub)',
+        playlistUrl: subHd
+      });
+    }
   }
 
   console.log(`[yanhh3d] Resolved ${results.length} streams (4K / 1080P)`);
