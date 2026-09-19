@@ -62,7 +62,7 @@ const HHPANDA = 'https://hhpanda.st';
 
 const builder = new addonBuilder({
   id: 'community.hhpanda',
-  version: '1.3.3',
+  version: '1.3.4',
   name: 'HHPanda & YanHH3D',
   logo: 'https://yanhh3d.men/storage/settings/January2026/logo.png',
   description: 'Hoạt hình Trung Quốc 3D • HHPanda & YanHH3D (1080P & 4K • Thuyết Minh & Vietsub)',
@@ -367,7 +367,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
   }
 
   try {
-    if (id.includes('yanhh3d.men')) {
+    if (yan.isYanId(id)) {
       const meta = await yan.fetchMetaYan(id);
       return { meta };
     } else {
@@ -406,7 +406,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
       : `http://0.0.0.0:${PORT}`);
 
   // NGUỒN 1: YanHH3D (1080P & 4K • Thuyết Minh & Vietsub)
-  if (id.includes('yanhh3d.men')) {
+  if (yan.isYanId(id)) {
     try {
       const yanStreams = await yan.resolveYanStreams(id);
       const outputStreams = [];
@@ -544,9 +544,10 @@ const server = http.createServer(async (req, res) => {
           : `http://${req.headers.host || '0.0.0.0'}`);
 
       try {
+        const yanBase = await yan.getBaseUrl();
         const plRes = await fetch(streamInfo.playlistUrl, {
           headers: {
-            'Referer': 'https://yanhh3d.men/',
+            'Referer': `${yanBase}/`,
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36'
           }
         });
@@ -602,9 +603,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
+        const yanBase = await yan.getBaseUrl();
         const upstreamHeaders = {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36',
-          'Referer': 'https://yanhh3d.men/'
+          'Referer': `${yanBase}/`
         };
 
         const segRes = await fetch(targetUrl, {

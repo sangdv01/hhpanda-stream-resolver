@@ -4,8 +4,78 @@
 
 'use strict';
 
-const BASE_URL = 'https://yanhh3d.men';
+const BITLY_URL = 'https://bit.ly/yanhh3d';
+let cachedBaseUrl = 'https://yanhh3d.men';
+let lastDomainCheck = 0;
+const DOMAIN_CACHE_TTL = 15 * 60 * 1000; // 15 phút kiểm tra redirect 1 lần
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36';
+
+/**
+ * Tự động phân giải domain mới nhất từ link chính https://bit.ly/yanhh3d
+ */
+async function getBaseUrl(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedBaseUrl && (now - lastDomainCheck < DOMAIN_CACHE_TTL)) {
+    return cachedBaseUrl;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(BITLY_URL, {
+      method: 'HEAD',
+      redirect: 'follow',
+      headers: { 'User-Agent': DEFAULT_UA },
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (res.url && res.url.startsWith('http')) {
+      const parsed = new URL(res.url);
+      if (parsed.origin && !parsed.origin.includes('bit.ly')) {
+        if (parsed.origin !== cachedBaseUrl) {
+          console.log(`[yanhh3d] Domain automatically updated: ${cachedBaseUrl} -> ${parsed.origin}`);
+          cachedBaseUrl = parsed.origin;
+        }
+        lastDomainCheck = now;
+        return cachedBaseUrl;
+      }
+    }
+  } catch (err) {
+    console.warn(`[yanhh3d] Domain lookup via ${BITLY_URL} failed (${err.message}). Using fallback: ${cachedBaseUrl}`);
+  }
+
+  lastDomainCheck = now;
+  return cachedBaseUrl;
+}
+
+/**
+ * Chuẩn hóa URL sang domain hiện tại (giúp các bookmark/thư viện cũ vẫn tự trỏ sang domain mới)
+ */
+async function normalizeYanUrl(rawUrl) {
+  const base = await getBaseUrl();
+  try {
+    const u = new URL(String(rawUrl || '').replace(/^https?:\/+(?=[^/])/, 'https://'));
+    return `${base}${u.pathname}${u.search}`;
+  } catch (e) {
+    return rawUrl;
+  }
+}
+
+/**
+ * Nhận diện ID có thuộc về nguồn YanHH3D hay không
+ */
+function isYanId(id) {
+  if (!id) return false;
+  const idStr = String(id).toLowerCase();
+  if (idStr.includes('hhpanda.st') || idStr.includes('hhpanda')) return false;
+  if (idStr.includes('yanhh3d')) return true;
+  try {
+    const curHost = new URL(cachedBaseUrl).hostname.toLowerCase();
+    if (idStr.includes(curHost)) return true;
+  } catch (e) {}
+  return idStr.startsWith('http://') || idStr.startsWith('https://');
+}
 
 function getText(html) {
   return String(html || '')
@@ -33,18 +103,19 @@ async function fetchHTML(url) {
  */
 async function fetchTrendingYan() {
   console.log('[yanhh3d] fetching trending catalog...');
-  const html = await fetchHTML(`${BASE_URL}/hoat-hinh-3d`);
+  const baseUrl = await getBaseUrl();
+  const html = await fetchHTML(`${baseUrl}/hoat-hinh-3d`);
 
   const cards = html.split(/class=["']flw-item["']/i).slice(1);
   const movies = [];
   const seen = new Set();
 
   for (const card of cards) {
-    const hrefMatch = card.match(/<a\b[^>]*href=["'](https:\/\/yanhh3d\.men\/[^"']+)["'][^>]*class=["'][^"']*film-poster-ahref/i) ||
-                      card.match(/<a\b[^>]*href=["'](https:\/\/yanhh3d\.men\/[^"']+)["']/i);
+    const hrefMatch = card.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*film-poster-ahref/i) ||
+                      card.match(/<a\b[^>]*href=["']([^"']+)["']/i);
     if (!hrefMatch) continue;
 
-    const href = hrefMatch[1];
+    const href = new URL(hrefMatch[1], baseUrl).href;
     if (seen.has(href)) continue;
     seen.add(href);
 
@@ -74,7 +145,7 @@ async function fetchTrendingYan() {
     });
   }
 
-  console.log(`[yanhh3d] Loaded ${movies.length} movies from catalog`);
+  console.log(`[yanhh3d] Loaded ${movies.length} movies from catalog (${baseUrl})`);
   return movies;
 }
 
@@ -82,7 +153,8 @@ async function fetchTrendingYan() {
  * Lấy chi tiết phim và danh sách tập
  */
 async function fetchMetaYan(seriesUrl) {
-  seriesUrl = String(seriesUrl || '').replace(/^https?:\/+(?=[^/])/, 'https://');
+  const baseUrl = await getBaseUrl();
+  seriesUrl = await normalizeYanUrl(seriesUrl);
   console.log('[yanhh3d] fetching meta for:', seriesUrl);
   const html = await fetchHTML(seriesUrl);
 
@@ -99,19 +171,19 @@ async function fetchMetaYan(seriesUrl) {
   const description = descMatch ? getText(descMatch[1]) : `${title} • Hoạt hình Trung Quốc 3D (YanHH3D)`;
 
   // Tìm link trang xem tập đầu tiên để lấy danh sách toàn bộ các tập
-  const watchMatch = html.match(/href=["']((?:https:\/\/yanhh3d\.men)?\/[^"']*\/tap-\d+[^"']*)["']/i);
+  const watchMatch = html.match(/href=["']((?:https?:\/\/[^"'\/]+)?\/[^"']*\/tap-\d+[^"']*)["']/i);
   let episodes = [];
 
   if (watchMatch) {
-    const watchUrl = watchMatch[1].startsWith('http') ? watchMatch[1] : `${BASE_URL}${watchMatch[1]}`;
+    const watchUrl = new URL(watchMatch[1], baseUrl).href;
     const watchHtml = await fetchHTML(watchUrl);
 
-    const epRegex = /<a\b[^>]*href=["']((?:https:\/\/yanhh3d\.men)?\/[^"']*\/tap-(\d+))["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const epRegex = /<a\b[^>]*href=["']((?:https?:\/\/[^"'\/]+)?\/[^"']*\/tap-(\d+))["'][^>]*>([\s\S]*?)<\/a>/gi;
     const seen = new Set();
     let m;
 
     while ((m = epRegex.exec(watchHtml)) !== null) {
-      const epUrl = m[1].startsWith('http') ? m[1] : `${BASE_URL}${m[1]}`;
+      const epUrl = new URL(m[1], baseUrl).href;
       const epNum = Number(m[2]);
       if (!seen.has(epNum)) {
         seen.add(epNum);
@@ -147,9 +219,10 @@ async function fetchMetaYan(seriesUrl) {
  */
 async function resolveEmbedPlayer(embedUrl) {
   if (!embedUrl) return null;
+  const baseUrl = await getBaseUrl();
   try {
     const res = await fetch(embedUrl, {
-      headers: { 'Referer': BASE_URL, 'User-Agent': DEFAULT_UA }
+      headers: { 'Referer': `${baseUrl}/`, 'User-Agent': DEFAULT_UA }
     });
     if (!res.ok) return null;
     const html = await res.text();
@@ -207,12 +280,13 @@ function findTsSyncOffset(buf) {
  * Phân giải tất cả các luồng 1080p và 4K (Thuyết Minh + Vietsub) cho một tập phim
  */
 async function resolveYanStreams(episodeUrl) {
-  episodeUrl = String(episodeUrl || '').replace(/^https?:\/+(?=[^/])/, 'https://');
+  const baseUrl = await getBaseUrl();
+  episodeUrl = await normalizeYanUrl(episodeUrl);
   console.log('[yanhh3d] resolving streams for:', episodeUrl);
 
   const cleanUrl = episodeUrl.replace('/sever2/', '/');
   const tmUrl = cleanUrl;
-  const subUrl = cleanUrl.replace(/https?:\/\/[^/]+\//, `${BASE_URL}/sever2/`);
+  const subUrl = cleanUrl.replace(/https?:\/\/[^/]+\//, `${baseUrl}/sever2/`);
 
   // Tải đồng thời cả 2 trang Thuyết Minh và Vietsub
   const [tmHtmlRes, subHtmlRes] = await Promise.allSettled([
@@ -342,6 +416,9 @@ async function resolveYanStreams(episodeUrl) {
 }
 
 module.exports = {
+  getBaseUrl,
+  normalizeYanUrl,
+  isYanId,
   fetchTrendingYan,
   fetchMetaYan,
   resolveYanStreams,
