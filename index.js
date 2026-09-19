@@ -525,6 +525,43 @@ const server = http.createServer(async (req, res) => {
       `http://${req.headers.host || '0.0.0.0'}`
     );
 
+    if (requestUrl.pathname === '/debug') {
+      const target = requestUrl.searchParams.get('url') || 'https://yanhh3d.men/sever2/gia-thien/tap-1';
+      try {
+        const cleanUrl = target.replace('/sever2/', '/');
+        const tmUrl = cleanUrl;
+        const subUrl = cleanUrl.replace('https://yanhh3d.men/', 'https://yanhh3d.men/sever2/');
+
+        const [tmRes, subRes] = await Promise.allSettled([
+          fetch(tmUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36' } }),
+          fetch(subUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36' } })
+        ]);
+
+        const tmStatus = tmRes.status === 'fulfilled' ? tmRes.value.status : tmRes.reason?.message;
+        const subStatus = subRes.status === 'fulfilled' ? subRes.value.status : subRes.reason?.message;
+        const subText = subRes.status === 'fulfilled' && subRes.value.ok ? await subRes.value.text() : '';
+        const btns = subText.match(/<[^>]+id=["']sv_[^"']+["'][^>]*>[\s\S]*?<\/[^>]+>/gi) || [];
+
+        const streams = await yan.resolveYanStreams(target);
+
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({
+          target,
+          tmUrl,
+          subUrl,
+          tmStatus,
+          subStatus,
+          subTextLength: subText.length,
+          btnsCount: btns.length,
+          btns: btns.map(b => b.trim()),
+          streams
+        }, null, 2));
+      } catch (err) {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message, stack: err.stack }));
+      }
+    }
+
     // ROUTE GATEWAY CHO YANHH3D:
     // 1. Phục vụ Playlist: /gateway/yan/:streamId/stream.m3u8
     const yanM3u8Match = requestUrl.pathname.match(/^\/gateway\/yan\/([^/]+)\/stream\.m3u8$/);
