@@ -316,6 +316,7 @@ builder.defineCatalogHandler(async ({ type, id }) => {
 });
 
 builder.defineMetaHandler(async ({ type, id }) => {
+  id = decodeURIComponent(id);
   console.log(`[meta] ${type} ${id}`);
 
   if (type !== 'series') {
@@ -478,6 +479,21 @@ const server = http.createServer(async (req, res) => {
         return await gatewayHandler(req, res);
       } finally {
         req.url = originalUrl;
+      }
+    }
+
+    const routeMatch = req.url.match(/^\/(meta|stream)\/([^/]+)\/(.+)$/);
+    if (routeMatch) {
+      const resource = routeMatch[1];
+      const type = routeMatch[2];
+      const remainder = routeMatch[3];
+      const [pathPart, queryString] = remainder.split('?');
+      const query = queryString ? `?${queryString}` : '';
+
+      if (pathPart.endsWith('.json')) {
+        const rawId = pathPart.slice(0, -5);
+        const encodedId = encodeURIComponent(decodeURIComponent(rawId));
+        req.url = `/${resource}/${type}/${encodedId}.json${query}`;
       }
     }
 
