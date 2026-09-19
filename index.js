@@ -62,7 +62,7 @@ const HHPANDA = 'https://hhpanda.st';
 
 const builder = new addonBuilder({
   id: 'community.hhpanda',
-  version: '1.3.2',
+  version: '1.3.3',
   name: 'HHPanda & YanHH3D',
   logo: 'https://yanhh3d.men/storage/settings/January2026/logo.png',
   description: 'Hoạt hình Trung Quốc 3D • HHPanda & YanHH3D (1080P & 4K • Thuyết Minh & Vietsub)',
@@ -564,7 +564,8 @@ const server = http.createServer(async (req, res) => {
           }
           try {
             const absUrl = new URL(trimmed, streamInfo.playlistUrl).href;
-            return `${publicBase}/gateway/yan/segment.ts?u=${encodeURIComponent(absUrl)}`;
+            const b64 = Buffer.from(absUrl).toString('base64url');
+            return `${publicBase}/gateway/yan/seg/${b64}.ts`;
           } catch (e) {
             return line;
           }
@@ -583,12 +584,21 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // 2. Phục vụ Segment MPEG-TS: /gateway/yan/segment.ts?u=...
-    if (requestUrl.pathname === '/gateway/yan/segment.ts') {
-      const targetUrl = requestUrl.searchParams.get('u');
+    // 2. Phục vụ Segment MPEG-TS: /gateway/yan/seg/:b64.ts (và fallback /gateway/yan/segment.ts?u=...)
+    const yanSegMatch = requestUrl.pathname.match(/^\/gateway\/yan\/seg\/([^/]+)\.ts$/);
+    if (yanSegMatch || requestUrl.pathname === '/gateway/yan/segment.ts') {
+      let targetUrl = null;
+      if (yanSegMatch) {
+        try {
+          targetUrl = Buffer.from(yanSegMatch[1], 'base64url').toString('utf8');
+        } catch (e) {}
+      } else {
+        targetUrl = requestUrl.searchParams.get('u');
+      }
+
       if (!targetUrl) {
         res.writeHead(400, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });
-        return res.end('missing u parameter');
+        return res.end('missing target segment url');
       }
 
       try {
@@ -611,36 +621,18 @@ const server = http.createServer(async (req, res) => {
         const offset = yan.findTsSyncOffset(segBuf);
         const videoChunk = segBuf.slice(offset);
 
-        let statusCode = 200;
-        let responseChunk = videoChunk;
-        const resHeaders = {
+        res.writeHead(200, {
           'content-type': 'video/mp2t',
           'access-control-allow-origin': '*',
-          'accept-ranges': 'bytes',
+          'content-length': videoChunk.length,
           'cache-control': 'public, max-age=86400'
-        };
-
-        if (req.headers.range) {
-          const rangeMatch = req.headers.range.match(/bytes=(\d+)-(\d*)/);
-          if (rangeMatch) {
-            const start = parseInt(rangeMatch[1], 10);
-            const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : videoChunk.length - 1;
-            if (start < videoChunk.length) {
-              statusCode = 206;
-              responseChunk = videoChunk.slice(start, end + 1);
-              resHeaders['content-range'] = `bytes ${start}-${end}/${videoChunk.length}`;
-            }
-          }
-        }
-
-        resHeaders['content-length'] = responseChunk.length;
-        res.writeHead(statusCode, resHeaders);
+        });
 
         if (req.method === 'HEAD') {
           return res.end();
         }
 
-        return res.end(responseChunk);
+        return res.end(videoChunk);
       } catch (err) {
         console.error('[gateway yan segment] error:', err.message);
         res.writeHead(500, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });
