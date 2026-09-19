@@ -62,22 +62,22 @@ const HHPANDA = 'https://hhpanda.st';
 
 const builder = new addonBuilder({
   id: 'community.hhpanda',
-  version: '1.3.4',
-  name: 'HHPanda & YanHH3D',
+  version: '1.3.5',
+  name: 'YanHH3D & HHPanda',
   logo: 'https://yanhh3d.men/storage/settings/January2026/logo.png',
-  description: 'Hoạt hình Trung Quốc 3D • HHPanda & YanHH3D (1080P & 4K • Thuyết Minh & Vietsub)',
+  description: 'Hoạt hình Trung Quốc 3D • YanHH3D & HHPanda (1080P & 4K • Thuyết Minh & Vietsub)',
   resources: ['catalog', 'meta', 'stream'],
   types: ['series', 'movie'],
   catalogs: [
     {
       type: 'series',
-      id: 'hhpanda',
-      name: 'HHPanda (Thịnh hành)'
+      id: 'yanhh3d',
+      name: 'YanHH3D (Hoạt Hình 3D)'
     },
     {
       type: 'series',
-      id: 'yanhh3d',
-      name: 'YanHH3D (Hoạt Hình 3D)'
+      id: 'hhpanda',
+      name: 'HHPanda (Thịnh hành)'
     }
   ]
 });
