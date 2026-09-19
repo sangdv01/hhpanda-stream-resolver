@@ -2,7 +2,7 @@ node_modules/
 *.PLAYBACK_OK_*
 *.before-*
 *.bak
-*.backup
+*.backup*
 package.json.before-render
 .env
 .env.*

@@ -60,12 +60,20 @@ jobs:
 
       - name: Deploy container
         run: |
+          FQDN=$(az containerapp show \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+
           az containerapp update \
             --name ${{ env.CONTAINER_APP }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --cpu 1.0 \
+            --memory 2.0Gi \
+            --min-replicas 1 \
             --set-env-vars \
               NODE_ENV=production \
               HEADLESS=1 \
               PORT=7000 \
-              AZURE_PUBLIC_URL=https://hhpanda-resolver.purplecliff-189df27e.southeastasia.azurecontainerapps.io
+              AZURE_PUBLIC_URL="https://${FQDN}"

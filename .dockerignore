@@ -4,3 +4,9 @@ node_modules
 *.log
 .env
 .env.*
+*.PLAYBACK_OK_*
+*.before-*
+*.bak
+*.backup
+dasda
+patch-quality-debug.js

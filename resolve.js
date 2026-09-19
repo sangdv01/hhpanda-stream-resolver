@@ -164,12 +164,17 @@ function patchedBundle(body) {
 }
 
 async function createStreamfreeBrowser() {
-
   const browser = await chromium.launch({
     channel: process.env.CHROME_CHANNEL || undefined,
-    headless: process.env.HEADLESS === '1'
+    headless: process.env.HEADLESS === '1',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-zygote'
+    ]
   });
-
 
   return browser;
 }
