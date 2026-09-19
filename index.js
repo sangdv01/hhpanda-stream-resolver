@@ -62,7 +62,7 @@ const HHPANDA = 'https://hhpanda.st';
 
 const builder = new addonBuilder({
   id: 'community.hhpanda',
-  version: '1.3.0',
+  version: '1.3.1',
   name: 'HHPanda & YanHH3D',
   logo: 'https://yanhh3d.men/storage/settings/January2026/logo.png',
   description: 'Hoạt hình Trung Quốc 3D • HHPanda & YanHH3D (1080P & 4K • Thuyết Minh & Vietsub)',
