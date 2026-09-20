@@ -233,7 +233,7 @@ const dateFormatter = new Intl.DateTimeFormat('vi-VN', {
 
 const builder = new addonBuilder({
   id: 'community.xoiche',
-  version: '1.6.2',
+  version: '1.6.3',
   name: 'Xôi Chè Live',
   description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea (Tỷ số LiveScore & Đa nguồn Xoilac HD)',
   resources: ['catalog', 'meta', 'stream'],
@@ -756,7 +756,45 @@ async function createPosterPNG(slug) {
 /*
  * XOILAC SCRAPER & STREAM RESOLVER (DỰ PHÒNG & BỔ SUNG ĐA NGUỒN)
  */
-const XOILAC_BASE = 'https://xoilacxbi.tv';
+const XOILAC_ENTRYPOINTS = [
+  'https://xoilacz.io',
+  'https://xoilaczzg.cc',
+  'https://xoilacxbi.tv'
+];
+let activeXoilacBase = 'https://xoilaczzg.cc';
+let activeXoilacTime = 0;
+const XOILAC_DOMAIN_TTL = 15 * 60 * 1000; // 15 phút cập nhật lại redirect nếu đổi domain
+
+async function getXoilacBaseUrl() {
+  if (activeXoilacBase && Date.now() - activeXoilacTime < XOILAC_DOMAIN_TTL) {
+    return activeXoilacBase;
+  }
+
+  for (const entry of XOILAC_ENTRYPOINTS) {
+    try {
+      const res = await httpClient.get(entry, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        },
+        maxRedirects: 5,
+        timeout: 2500
+      });
+
+      const finalUrl = res.request?.res?.responseUrl || res.config?.url || entry;
+      if (finalUrl) {
+        activeXoilacBase = new URL(finalUrl).origin;
+        activeXoilacTime = Date.now();
+        return activeXoilacBase;
+      }
+    } catch (err) {
+      // Tiếp tục thử domain tiếp theo
+    }
+  }
+
+  return activeXoilacBase || 'https://xoilaczzg.cc';
+}
+
 const IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1';
 
 let xoilacMatchesCache = { time: 0, matches: [] };
@@ -766,7 +804,8 @@ async function getXoilacMatches() {
     return xoilacMatchesCache.matches;
   }
   try {
-    const res = await httpClient.get(`${XOILAC_BASE}/`, {
+    const baseUrl = await getXoilacBaseUrl();
+    const res = await httpClient.get(`${baseUrl}/`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
@@ -783,7 +822,7 @@ async function getXoilacMatches() {
       // Chuẩn hoá URL, bỏ các link con /link/0
       href = href.replace(/\/link\/\d+.*$/, '');
       if (!href.endsWith('/')) href += '/';
-      if (!href.startsWith('http')) href = `${XOILAC_BASE}${href}`;
+      if (!href.startsWith('http')) href = `${baseUrl}${href}`;
       if (seen.has(href)) continue;
       seen.add(href);
       const text = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -833,6 +872,7 @@ function extractTeamsFromSlug(slug) {
 
 async function fetchXoilacStreams(homeName, awayName) {
   try {
+    const baseUrl = await getXoilacBaseUrl();
     const matches = await getXoilacMatches();
     const found = matches.find(m =>
       (matchTeam(m.url, homeName) || matchTeam(m.text, homeName)) &&
@@ -840,9 +880,11 @@ async function fetchXoilacStreams(homeName, awayName) {
     );
     if (!found) return [];
 
-    const pageRes = await httpClient.get(found.url, {
+    const pageUrl = found.url.startsWith('http') ? found.url : `${baseUrl}${found.url}`;
+    const pageRes = await httpClient.get(pageUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36',
+        'Referer': `${baseUrl}/`
       },
       timeout: 4500
     });
@@ -869,7 +911,7 @@ async function fetchXoilacStreams(homeName, awayName) {
       return [];
     }
 
-    // 3. Tải link m3u8 cho từng kênh BLV (tối đa 5 kênh)
+    // 3. Tải link m3u8 cho từng kênh BLV (tối đa 6 kênh)
     const channelPromises = listStream.slice(0, 6).map(async (channelList, idx) => {
       if (!Array.isArray(channelList) || channelList.length === 0) return null;
       const rawBlv = blvMap.get(idx);
@@ -880,7 +922,7 @@ async function fetchXoilacStreams(homeName, awayName) {
           const res = await httpClient.get(chanUrl, {
             headers: {
               'User-Agent': IOS_UA,
-              'Referer': `${XOILAC_BASE}/`
+              'Referer': `${baseUrl}/`
             },
             timeout: 3000
           });
@@ -911,14 +953,55 @@ async function fetchXoilacStreams(homeName, awayName) {
 }
 
 /*
- * XOICHE STREAM FETCHER
+ * XOICHE STREAM FETCHER (TÌM THEO SLUG HOẶC TÊN ĐỘI BÓNG)
  */
-async function fetchXoicheStreams(slug) {
+let xoicheMatchesCache = { time: 0, data: [] };
+
+async function getXoicheAllMatches() {
+  if (Date.now() - xoicheMatchesCache.time < 120000 && xoicheMatchesCache.data.length > 0) {
+    return xoicheMatchesCache.data;
+  }
   try {
-    let fixtureId = globalSlugToId.get(slug) || matchesCache.slugToFixtureId.get(slug);
-    if (!fixtureId) {
-      await getRawMatches();
-      fixtureId = globalSlugToId.get(slug) || matchesCache.slugToFixtureId.get(slug);
+    const res = await httpClient.get(`${XOICHE}/api/matches?filter=all`, {
+      headers: HEADERS,
+      timeout: 3500
+    });
+    const d = res.data || {};
+    const all = [
+      ...(Array.isArray(d.live) ? d.live : []),
+      ...(Array.isArray(d.spotlight) ? d.spotlight : []),
+      ...(Array.isArray(d.scoreboard) ? d.scoreboard : []),
+      ...(Array.isArray(d.pinned) ? d.pinned : [])
+    ];
+    if (all.length > 0) {
+      xoicheMatchesCache = { time: Date.now(), data: all };
+      for (const m of all) {
+        if (m?.slug && m?.id) {
+          globalSlugToId.set(m.slug, m.id);
+        }
+      }
+    }
+    return xoicheMatchesCache.data;
+  } catch (e) {
+    return xoicheMatchesCache.data;
+  }
+}
+
+async function fetchXoicheStreams(slug, homeName, awayName) {
+  try {
+    let fixtureId = globalSlugToId.get(slug);
+
+    if (!fixtureId && homeName && awayName) {
+      const allXoiche = await getXoicheAllMatches();
+      const found = allXoiche.find(m =>
+        (matchTeam(m.homeTeam?.name, homeName) || matchTeam(m.slug, homeName)) &&
+        (matchTeam(m.awayTeam?.name, awayName) || matchTeam(m.slug, awayName))
+      );
+      if (found) {
+        fixtureId = found.id;
+        globalSlugToId.set(slug, found.id);
+        if (found.slug) globalSlugToId.set(found.slug, found.id);
+      }
     }
 
     if (!fixtureId) return [];
@@ -938,7 +1021,7 @@ async function fetchXoicheStreams(slug) {
     if (sources?.mainChannel?.hlsUrl) {
       streams.push({
         name: 'Xôi Chè - Main',
-        title: 'Main Channel',
+        title: 'Main Channel (Xôi Chè)',
         url: sources.mainChannel.hlsUrl,
         behaviorHints: {
           notWebReady: false
@@ -950,7 +1033,7 @@ async function fetchXoicheStreams(slug) {
       if (!room.hlsUrl) continue;
       streams.push({
         name: `Xôi Chè - ${room.name || 'BLV'}`,
-        title: `BLV ${room.name || ''}`.trim(),
+        title: `BLV ${room.name || ''} (Xôi Chè)`.trim(),
         url: room.hlsUrl,
         behaviorHints: {
           notWebReady: false
@@ -997,7 +1080,7 @@ async function getCombinedStreams(slug, homeName, awayName) {
 
       // Tải song song cả 2 nguồn: Xôi Chè và Xoilac
       const [xoicheResult, xoilacResult] = await Promise.allSettled([
-        fetchXoicheStreams(slug),
+        fetchXoicheStreams(slug, home, away),
         fetchXoilacStreams(home, away)
       ]);
 
