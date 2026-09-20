@@ -22,7 +22,7 @@ const httpClient = axios.create({
  */
 const DEFAULT_MATCHES_CACHE_TTL = 3 * 60 * 1000; // 3 phút khi không có trận live
 const LIVE_MATCHES_CACHE_TTL = 60 * 1000; // 1 phút khi có trận đang live
-const SOURCES_CACHE_TTL = 60 * 1000; // Cache link stream HLS 60 giây (bấm lại là tức thì 0ms)
+const SOURCES_CACHE_TTL = 90 * 1000; // Cache link stream HLS 90 giây (bấm lại là tức thì 0ms)
 const POSTER_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 giờ cho trận chưa đá
 const LIVE_POSTER_CACHE_TTL = 60 * 1000; // 60 giây cho trận đang live
 const LOGO_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 giờ
@@ -162,9 +162,9 @@ const dateFormatter = new Intl.DateTimeFormat('vi-VN', {
 
 const builder = new addonBuilder({
   id: 'community.xoiche',
-  version: '1.5.1',
+  version: '1.6.0',
   name: 'Xôi Chè Live',
-  description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea từ Xôi Chè (Tỷ số trực tiếp)',
+  description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea (Đa nguồn Xôi Chè & Xoilac HD, Tỷ số trực tiếp)',
   resources: ['catalog', 'meta', 'stream'],
   types: ['movie'],
   catalogs: [
@@ -419,6 +419,12 @@ builder.defineMetaHandler(async ({ id }) => {
   try {
     const { matches } = await getRawMatches();
     const found = matches.find(m => m.id === id);
+
+    // Kích hoạt nạp trước luồng stream trong nền (pre-warm) ngay khi người dùng bấm vào xem thông tin trận
+    if (found && (found.isLive || !found.isFinished)) {
+      getCombinedStreams(slug, found.homeName, found.awayName).catch(() => {});
+    }
+
     return {
       meta: found || { id, type: 'movie', name: slug }
     };
@@ -555,82 +561,185 @@ async function createPosterPNG(slug) {
 }
 
 /*
- * GET SOURCES (SIÊU TỐC - CÓ CACHE & DEDUPLICATION)
+ * XOILAC SCRAPER & STREAM RESOLVER (DỰ PHÒNG & BỔ SUNG ĐA NGUỒN)
  */
-async function getSources(slug) {
-  // 1. Kiểm tra cache sources trước: nếu đã lấy trong vòng 60s thì trả về 0ms!
-  const cached = sourcesCache.get(slug);
-  if (cached) {
-    return cached;
-  }
+const XOILAC_BASE = 'https://xoilacxbi.tv';
+const IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1';
 
-  // 2. Chống lặp request khi Stremio gọi 2 lần cùng lúc
-  if (inFlightSources.has(slug)) {
-    return inFlightSources.get(slug);
-  }
+let xoilacMatchesCache = { time: 0, matches: [] };
 
-  const task = (async () => {
+async function getXoilacMatches() {
+  if (Date.now() - xoilacMatchesCache.time < 180000 && xoilacMatchesCache.matches.length > 0) {
+    return xoilacMatchesCache.matches;
+  }
+  try {
+    const res = await httpClient.get(`${XOILAC_BASE}/`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      timeout: 5000
+    });
+    const matches = [];
+    const linkRegex = /<a\s+[^>]*href=["'](https?:\/\/[^"']*\/truc-tiep\/[^"']+|\/truc-tiep\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    const seen = new Set();
+    while ((m = linkRegex.exec(res.data)) !== null) {
+      let href = m[1];
+      if (href.endsWith('/truc-tiep/')) continue;
+      // Chuẩn hoá URL, bỏ các link con /link/0
+      href = href.replace(/\/link\/\d+.*$/, '');
+      if (!href.endsWith('/')) href += '/';
+      if (!href.startsWith('http')) href = `${XOILAC_BASE}${href}`;
+      if (seen.has(href)) continue;
+      seen.add(href);
+      const text = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      matches.push({ url: href, text });
+    }
+    if (matches.length > 0) {
+      xoilacMatchesCache = { time: Date.now(), matches };
+    }
+    return xoilacMatchesCache.matches;
+  } catch (err) {
+    console.error('[xoilac matches] error:', err.message);
+    return xoilacMatchesCache.matches;
+  }
+}
+
+function toKeywords(name) {
+  return (name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !['afc', 'the'].includes(w));
+}
+
+function matchTeam(textOrUrl, teamName) {
+  const norm = (textOrUrl || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+  const kw = toKeywords(teamName);
+  if (kw.length === 0) return false;
+  if (kw.length === 1) return norm.includes(kw[0]);
+  const matchCount = kw.filter(w => norm.includes(w)).length;
+  return matchCount >= Math.min(2, kw.length);
+}
+
+function extractTeamsFromSlug(slug) {
+  const clean = slug.replace(/^xoiche:/, '').replace(/-\d+$/, '');
+  const parts = clean.split('-v-');
+  if (parts.length >= 2) {
+    return {
+      home: parts[0].replace(/-/g, ' '),
+      away: parts[1].replace(/-/g, ' ')
+    };
+  }
+  return { home: '', away: '' };
+}
+
+async function fetchXoilacStreams(homeName, awayName) {
+  try {
+    const matches = await getXoilacMatches();
+    const found = matches.find(m =>
+      (matchTeam(m.url, homeName) || matchTeam(m.text, homeName)) &&
+      (matchTeam(m.url, awayName) || matchTeam(m.text, awayName))
+    );
+    if (!found) return [];
+
+    const pageRes = await httpClient.get(found.url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36'
+      },
+      timeout: 4500
+    });
+    const html = pageRes.data;
+
+    // 1. Lấy danh sách tên BLV
+    const blvMap = new Map();
+    const linkRegex = /<a[^>]+data-link=["'](\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let lm;
+    while ((lm = linkRegex.exec(html)) !== null) {
+      const idx = parseInt(lm[1], 10);
+      const name = lm[2].replace(/<[^>]+>/g, '').trim();
+      if (name) blvMap.set(idx, name);
+    }
+
+    // 2. Lấy cấu hình list_stream
+    const streamMatch = html.match(/var\s+list_stream\s*=\s*(\[[\s\S]*?\]);/);
+    if (!streamMatch) return [];
+
+    let listStream;
     try {
-      // 3. Lấy fixtureId từ bộ nhớ vĩnh viễn (0ms)
-      let fixtureId = globalSlugToId.get(slug) || matchesCache.slugToFixtureId.get(slug);
+      listStream = JSON.parse(streamMatch[1].replace(/\\\//g, '/'));
+    } catch {
+      return [];
+    }
 
-      if (!fixtureId) {
-        await getRawMatches();
-        fixtureId = globalSlugToId.get(slug) || matchesCache.slugToFixtureId.get(slug);
-      }
+    // 3. Tải link m3u8 cho từng kênh BLV (tối đa 5 kênh)
+    const channelPromises = listStream.slice(0, 6).map(async (channelList, idx) => {
+      if (!Array.isArray(channelList) || channelList.length === 0) return null;
+      const rawBlv = blvMap.get(idx);
+      const blvName = rawBlv ? rawBlv : `Kênh ${idx + 1}`;
 
-      // 4. Chỉ cào HTML dự phòng nếu thực sự không có ID
-      if (!fixtureId) {
+      for (const chanUrl of channelList.slice(0, 2)) {
         try {
-          const pageRes = await httpClient.get(`${XOICHE}/tran-dau/${encodeURIComponent(slug)}`, {
-            headers: HEADERS,
-            timeout: 6000
+          const res = await httpClient.get(chanUrl, {
+            headers: {
+              'User-Agent': IOS_UA,
+              'Referer': `${XOILAC_BASE}/`
+            },
+            timeout: 3000
           });
-          const m = pageRes.data.match(/\\"match\\":\{\\"id\\":\\"([0-9a-f-]{36})\\"/i);
-          if (m) {
-            fixtureId = m[1];
-            globalSlugToId.set(slug, fixtureId);
+          const m = res.data.match(/var\s+urlStream\s*=\s*["']([^"']+)["']/);
+          if (m && m[1] && m[1].includes('.m3u8')) {
+            return {
+              name: `Xoilac - ${blvName}`,
+              title: `${blvName} (HD)`,
+              url: m[1],
+              behaviorHints: {
+                notWebReady: false
+              }
+            };
           }
-        } catch (e) {
-          console.error('[xoiche html scrape fallback] failed:', e.message);
+        } catch {
+          // Bỏ qua lỗi từng mirror
         }
       }
+      return null;
+    });
 
-      if (!fixtureId) {
-        throw new Error(`Không tìm thấy fixtureId cho trận: ${slug}`);
-      }
-
-      // 5. Gọi API lấy danh sách luồng với Referer và keep-alive
-      const response = await httpClient.get(`${XOICHE}/api/matches/${encodeURIComponent(fixtureId)}/sources`, {
-        headers: {
-          ...HEADERS,
-          'Accept': 'application/json',
-          'Referer': `${XOICHE}/tran-dau/${encodeURIComponent(slug)}`
-        },
-        timeout: 7000
-      });
-
-      const sourcesData = response.data || {};
-      sourcesCache.set(slug, sourcesData);
-      return sourcesData;
-    } finally {
-      inFlightSources.delete(slug);
-    }
-  })();
-
-  inFlightSources.set(slug, task);
-  return task;
+    const results = await Promise.all(channelPromises);
+    return results.filter(Boolean);
+  } catch (err) {
+    console.error('[xoilac streams] error:', err.message);
+    return [];
+  }
 }
 
 /*
- * STREAM HANDLER
+ * XOICHE STREAM FETCHER
  */
-builder.defineStreamHandler(async ({ type, id }) => {
-  if (type !== 'movie' || !id.startsWith('xoiche:')) return { streams: [] };
-  const slug = id.replace('xoiche:', '');
-
+async function fetchXoicheStreams(slug) {
   try {
-    const sources = await getSources(slug);
+    let fixtureId = globalSlugToId.get(slug) || matchesCache.slugToFixtureId.get(slug);
+    if (!fixtureId) {
+      await getRawMatches();
+      fixtureId = globalSlugToId.get(slug) || matchesCache.slugToFixtureId.get(slug);
+    }
+
+    if (!fixtureId) return [];
+
+    const response = await httpClient.get(`${XOICHE}/api/matches/${encodeURIComponent(fixtureId)}/sources`, {
+      headers: {
+        ...HEADERS,
+        'Accept': 'application/json',
+        'Referer': `${XOICHE}/tran-dau/${encodeURIComponent(slug)}`
+      },
+      timeout: 3500 // Strict timeout: không để treo người dùng
+    });
+
+    const sources = response.data || {};
     const streams = [];
 
     if (sources?.mainChannel?.hlsUrl) {
@@ -656,18 +765,94 @@ builder.defineStreamHandler(async ({ type, id }) => {
       });
     }
 
-    // Loại bỏ link trùng
-    const unique = [];
-    const seen = new Set();
-    for (const stream of streams) {
-      if (!seen.has(stream.url)) {
-        seen.add(stream.url);
-        unique.push(stream);
-      }
-    }
-    return { streams: unique };
+    return streams;
   } catch (err) {
-    console.error('[xoiche stream] error:', err.message);
+    console.error('[xoiche api sources] error:', err.message);
+    return [];
+  }
+}
+
+/*
+ * GET COMBINED STREAMS (XÔI CHÈ + XOILAC - CÓ CACHE & IN-FLIGHT DEDUP)
+ */
+async function getCombinedStreams(slug, homeName, awayName) {
+  const cached = sourcesCache.get(slug);
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    return cached;
+  }
+
+  if (inFlightSources.has(slug)) {
+    return inFlightSources.get(slug);
+  }
+
+  const task = (async () => {
+    try {
+      let home = homeName;
+      let away = awayName;
+      if (!home || !away) {
+        const match = matchesCache.matches.find(m => m.id === `xoiche:${slug}`) ||
+                      INITIAL_FALLBACK_MATCHES.find(m => m.id === `xoiche:${slug}`);
+        if (match) {
+          home = match.homeName;
+          away = match.awayName;
+        } else {
+          const extracted = extractTeamsFromSlug(slug);
+          home = extracted.home;
+          away = extracted.away;
+        }
+      }
+
+      // Tải song song cả 2 nguồn: Xôi Chè và Xoilac
+      const [xoicheResult, xoilacResult] = await Promise.allSettled([
+        fetchXoicheStreams(slug),
+        fetchXoilacStreams(home, away)
+      ]);
+
+      const xoicheStreams = xoicheResult.status === 'fulfilled' ? xoicheResult.value : [];
+      const xoilacStreams = xoilacResult.status === 'fulfilled' ? xoilacResult.value : [];
+
+      const allStreams = [...xoicheStreams, ...xoilacStreams];
+
+      // Loại bỏ trùng lặp theo URL
+      const unique = [];
+      const seen = new Set();
+      for (const st of allStreams) {
+        if (!seen.has(st.url)) {
+          seen.add(st.url);
+          unique.push(st);
+        }
+      }
+
+      if (unique.length > 0) {
+        sourcesCache.set(slug, unique, SOURCES_CACHE_TTL);
+      }
+      return unique;
+    } finally {
+      inFlightSources.delete(slug);
+    }
+  })();
+
+  inFlightSources.set(slug, task);
+  return task;
+}
+
+/*
+ * STREAM HANDLER
+ */
+builder.defineStreamHandler(async ({ type, id }) => {
+  if (type !== 'movie' || !id.startsWith('xoiche:')) return { streams: [] };
+  const slug = id.replace('xoiche:', '');
+
+  try {
+    const match = matchesCache.matches.find(m => m.id === id) ||
+                  INITIAL_FALLBACK_MATCHES.find(m => m.id === id);
+    const homeName = match?.homeName || '';
+    const awayName = match?.awayName || '';
+
+    const streams = await getCombinedStreams(slug, homeName, awayName);
+    return { streams };
+  } catch (err) {
+    console.error('[xoiche stream handler] error:', err.message);
     return { streams: [] };
   }
 });
