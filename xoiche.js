@@ -73,9 +73,56 @@ let rawMatchesPromise = null; // Gộp request meta và stream nếu đến cùn
 // Bảng ánh xạ vĩnh viễn slug -> fixtureId để KHÔNG BAO GIỜ phải cào HTML
 const globalSlugToId = new Map();
 
+const INITIAL_FALLBACK_MATCHES = [
+  {
+    id: 'xoiche:bournemouth-v-liverpool-1557407',
+    type: 'movie',
+    name: 'Bournemouth vs Liverpool',
+    homeName: 'Bournemouth',
+    awayName: 'Liverpool',
+    description: 'Bournemouth vs Liverpool\nGiải đấu: Premier League',
+    competition: 'Premier League',
+    competitionSlug: 'premier-league-39',
+    kickoffAt: '2026-09-20T13:00:00.000Z'
+  },
+  {
+    id: 'xoiche:leeds-v-crystal-palace-1557412',
+    type: 'movie',
+    name: 'Leeds vs Crystal Palace',
+    homeName: 'Leeds',
+    awayName: 'Crystal Palace',
+    description: 'Leeds vs Crystal Palace\nGiải đấu: Premier League',
+    competition: 'Premier League',
+    competitionSlug: 'premier-league-39',
+    kickoffAt: '2026-09-20T13:00:00.000Z'
+  },
+  {
+    id: 'xoiche:manchester-city-v-sunderland-1557413',
+    type: 'movie',
+    name: 'Manchester City vs Sunderland',
+    homeName: 'Manchester City',
+    awayName: 'Sunderland',
+    description: 'Manchester City vs Sunderland\nGiải đấu: Premier League',
+    competition: 'Premier League',
+    competitionSlug: 'premier-league-39',
+    kickoffAt: '2026-09-20T13:00:00.000Z'
+  },
+  {
+    id: 'xoiche:fulham-v-manchester-united-1557411',
+    type: 'movie',
+    name: 'Fulham vs Manchester United',
+    homeName: 'Fulham',
+    awayName: 'Manchester United',
+    description: 'Fulham vs Manchester United\nGiải đấu: Premier League',
+    competition: 'Premier League',
+    competitionSlug: 'premier-league-39',
+    kickoffAt: '2026-09-20T15:30:00.000Z'
+  }
+];
+
 let matchesCache = {
   time: 0,
-  matches: [],
+  matches: INITIAL_FALLBACK_MATCHES,
   slugToFixtureId: new Map()
 };
 
@@ -227,7 +274,7 @@ async function getRawMatches(baseUrl) {
     try {
       const response = await httpClient.get(`${XOICHE}/api/matches?filter=all`, {
         headers: HEADERS,
-        timeout: 10000
+        timeout: 18000
       });
 
       const data = response.data || {};
@@ -304,6 +351,11 @@ async function getRawMatches(baseUrl) {
       };
 
       return matchesCache;
+    } catch (err) {
+      console.error('[xoiche api error]:', err.message);
+      // Khi Xôi Chè 502 / timeout, đặt lại time để giữ cache cũ và không spam
+      matchesCache.time = Date.now();
+      return matchesCache;
     } finally {
       rawMatchesPromise = null;
     }
@@ -316,7 +368,7 @@ async function getRawMatches(baseUrl) {
  * FILTER: PREMIER LEAGUE (EPL) HOẶC CÓ CHELSEA THAM GIA
  */
 function filterMatches(matches) {
-  return matches.filter(match => {
+  return (matches || []).filter(match => {
     const compSlug = (match.competitionSlug || '').toLowerCase();
     const compName = (match.competition || '').toLowerCase();
     const isEpl = compSlug.includes('premier-league') || compName.includes('premier league');
@@ -338,9 +390,10 @@ builder.defineCatalogHandler(async ({ type, id }) => {
   try {
     const { matches } = await getRawMatches();
     const filtered = filterMatches(matches);
+    const list = filtered.length > 0 ? filtered : filterMatches(INITIAL_FALLBACK_MATCHES);
 
     // Sắp xếp: Live lên đầu -> Trận sắp đá -> Trận đã xong
-    filtered.sort((a, b) => {
+    list.sort((a, b) => {
       if (a.isLive && !b.isLive) return -1;
       if (!a.isLive && b.isLive) return 1;
 
@@ -350,10 +403,11 @@ builder.defineCatalogHandler(async ({ type, id }) => {
       return new Date(a.kickoffAt) - new Date(b.kickoffAt);
     });
 
-    return { metas: filtered };
+    return { metas: list };
   } catch (err) {
     console.error('[xoiche catalog] error:', err.message);
-    return { metas: filterMatches(matchesCache.matches || []) };
+    const fallback = filterMatches(matchesCache.matches || INITIAL_FALLBACK_MATCHES);
+    return { metas: fallback.length > 0 ? fallback : INITIAL_FALLBACK_MATCHES };
   }
 });
 
