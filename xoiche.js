@@ -7,8 +7,10 @@ const XOICHE = 'https://xoiche.tv';
 /*
  * CACHE & LIMITS
  */
-const MATCHES_CACHE_TTL = 3 * 60 * 1000; // 3 phút
-const POSTER_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 giờ
+const DEFAULT_MATCHES_CACHE_TTL = 3 * 60 * 1000; // 3 phút khi không có trận live
+const LIVE_MATCHES_CACHE_TTL = 60 * 1000; // 1 phút khi có trận đang live để cập nhật tỷ số
+const POSTER_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 giờ cho trận chưa đá
+const LIVE_POSTER_CACHE_TTL = 60 * 1000; // 60 giây cho trận đang live
 const LOGO_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 giờ
 const MAX_CACHE_ENTRIES = 100;
 
@@ -22,7 +24,8 @@ class SimpleLRUCache {
   get(key) {
     const item = this.cache.get(key);
     if (!item) return null;
-    if (Date.now() - item.time > this.ttl) {
+    const ttl = item.ttl || this.ttl;
+    if (Date.now() - item.time > ttl) {
       this.cache.delete(key);
       return null;
     }
@@ -31,14 +34,18 @@ class SimpleLRUCache {
     return item.value;
   }
 
-  set(key, value) {
+  set(key, value, customTtl) {
     if (this.cache.has(key)) {
       this.cache.delete(key);
     } else if (this.cache.size >= this.max) {
       const oldestKey = this.cache.keys().next().value;
       this.cache.delete(oldestKey);
     }
-    this.cache.set(key, { time: Date.now(), value });
+    this.cache.set(key, {
+      time: Date.now(),
+      value,
+      ttl: customTtl || this.ttl
+    });
   }
 }
 
@@ -88,9 +95,9 @@ const dateFormatter = new Intl.DateTimeFormat('vi-VN', {
 
 const builder = new addonBuilder({
   id: 'community.xoiche',
-  version: '1.4.0',
+  version: '1.5.0',
   name: 'Xôi Chè Live',
-  description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea từ Xôi Chè',
+  description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea từ Xôi Chè (Tỷ số trực tiếp)',
   resources: ['catalog', 'meta', 'stream'],
   types: ['movie'],
   catalogs: [
@@ -104,16 +111,102 @@ const builder = new addonBuilder({
 });
 
 /*
+ * XỬ LÝ TRẠNG THÁI VÀ TỶ SỐ TRỰC TIẾP
+ */
+function parseScoreInfo(match) {
+  const status = (match.status || '').toUpperCase();
+  const elapsed = match.elapsed ? `${match.elapsed}'` : '';
+  const hasScore = typeof match.homeScore === 'number' && typeof match.awayScore === 'number';
+  const score = hasScore ? `${match.homeScore} - ${match.awayScore}` : '';
+
+  // HT: Nghỉ giữa hiệp
+  if (status === 'HT') {
+    return {
+      isLive: true,
+      isFinished: false,
+      badge: hasScore ? `[HT ${score}]` : '[HT]',
+      statusText: 'HT',
+      scoreDisplay: score || '0 - 0',
+      detailStatus: `Nghỉ giữa hiệp (HT)`
+    };
+  }
+
+  // 1H: Hiệp 1
+  if (status === '1H') {
+    const timeBadge = elapsed || 'H1';
+    return {
+      isLive: true,
+      isFinished: false,
+      badge: hasScore ? `🔴 [${timeBadge} ${score}]` : `🔴 [${timeBadge}]`,
+      statusText: elapsed || 'H1',
+      scoreDisplay: score || '0 - 0',
+      detailStatus: `Đang đá Hiệp 1 (${elapsed || 'H1'})`
+    };
+  }
+
+  // 2H: Hiệp 2
+  if (status === '2H') {
+    const timeBadge = elapsed || 'H2';
+    return {
+      isLive: true,
+      isFinished: false,
+      badge: hasScore ? `🔴 [${timeBadge} ${score}]` : `🔴 [${timeBadge}]`,
+      statusText: elapsed || 'H2',
+      scoreDisplay: score || '0 - 0',
+      detailStatus: `Đang đá Hiệp 2 (${elapsed || 'H2'})`
+    };
+  }
+
+  // FT / AET: Kết thúc trận đấu
+  if (status === 'FT' || status === 'AET' || status === 'FINISHED') {
+    return {
+      isLive: false,
+      isFinished: true,
+      badge: hasScore ? `[FT ${score}]` : '[FT]',
+      statusText: 'FT',
+      scoreDisplay: score || 'FT',
+      detailStatus: `Đã kết thúc (FT)`
+    };
+  }
+
+  // Trận đang diễn ra nói chung
+  if (status === 'LIVE' || (match.elapsed > 0 && hasScore)) {
+    const timeBadge = elapsed || 'LIVE';
+    return {
+      isLive: true,
+      isFinished: false,
+      badge: `🔴 [${timeBadge} ${score}]`,
+      statusText: elapsed || 'LIVE',
+      scoreDisplay: score || '0 - 0',
+      detailStatus: `Đang diễn ra (${elapsed})`
+    };
+  }
+
+  // Trận chưa bắt đầu
+  return {
+    isLive: false,
+    isFinished: false,
+    badge: '',
+    statusText: '',
+    scoreDisplay: '',
+    detailStatus: 'Chưa diễn ra'
+  };
+}
+
+/*
  * GET MATCHES TỪ API XOICHE
  */
 async function getRawMatches(baseUrl) {
-  if (matchesCache.matches.length > 0 && Date.now() - matchesCache.time < MATCHES_CACHE_TTL) {
+  const hasLiveMatch = matchesCache.matches.some(m => m.isLive);
+  const cacheTtl = hasLiveMatch ? LIVE_MATCHES_CACHE_TTL : DEFAULT_MATCHES_CACHE_TTL;
+
+  if (matchesCache.matches.length > 0 && Date.now() - matchesCache.time < cacheTtl) {
     return matchesCache;
   }
 
   const response = await axios.get(`${XOICHE}/api/matches?filter=all`, {
     headers: HEADERS,
-    timeout: 10000
+    timeout: 15000
   });
 
   const data = response.data || {};
@@ -144,13 +237,29 @@ async function getRawMatches(baseUrl) {
     const kickoffTime = timeFormatter.format(kickoff);
     const kickoffDate = dateFormatter.format(kickoff);
 
+    const scoreInfo = parseScoreInfo(match);
+
+    // Hiển thị tên kèm tỷ số trực tiếp trên Catalog
+    const displayName = scoreInfo.badge
+      ? `${scoreInfo.badge} ${homeName} vs ${awayName}`
+      : `${homeName} vs ${awayName}`;
+
+    // Mô tả chi tiết
+    let description = `${homeName} vs ${awayName}\n`;
+    if (scoreInfo.isLive || scoreInfo.isFinished) {
+      description += `Tỷ số: ${match.homeScore ?? 0} - ${match.awayScore ?? 0}\n`;
+      description += `Trạng thái: ${scoreInfo.detailStatus}\n`;
+    }
+    description += `Giải đấu: ${match.competition?.name || 'Bóng đá'}\n`;
+    description += `Giờ đá: ${kickoffTime} - ${kickoffDate}`;
+
     unique.push({
       id: `xoiche:${match.slug}`,
       type: 'movie',
-      name: `${homeName} vs ${awayName}`,
+      name: displayName,
       homeName,
       awayName,
-      description: `${homeName} vs ${awayName}\nGiải đấu: ${match.competition?.name || 'Bóng đá'}\nGiờ đá: ${kickoffTime} - ${kickoffDate}`,
+      description,
       releaseInfo: match.kickoffAt,
       website: `${XOICHE}/tran-dau/${encodeURIComponent(match.slug)}`,
       homeLogo: match.homeTeam?.logoUrl || '',
@@ -159,7 +268,11 @@ async function getRawMatches(baseUrl) {
       competition: match.competition?.name || '',
       competitionSlug: match.competition?.slug || '',
       competitionLogo: match.competition?.logoUrl || '',
-      poster: `${posterBase}/poster/${encodeURIComponent(match.slug)}.png`
+      poster: `${posterBase}/poster/${encodeURIComponent(match.slug)}.png`,
+      isLive: scoreInfo.isLive,
+      isFinished: scoreInfo.isFinished,
+      statusText: scoreInfo.statusText,
+      scoreDisplay: scoreInfo.scoreDisplay
     });
   }
 
@@ -198,7 +311,21 @@ builder.defineCatalogHandler(async ({ type, id }) => {
   try {
     const { matches } = await getRawMatches();
     const filtered = filterMatches(matches);
-    filtered.sort((a, b) => new Date(a.kickoffAt) - new Date(b.kickoffAt));
+
+    // Sắp xếp thông minh:
+    // 1. Trận đang LIVE lên đầu tiên
+    // 2. Trận sắp đá (hôm nay, tối nay) ở giữa theo giờ đá
+    // 3. Trận đã kết thúc (FT) ở cuối
+    filtered.sort((a, b) => {
+      if (a.isLive && !b.isLive) return -1;
+      if (!a.isLive && b.isLive) return 1;
+
+      if (!a.isFinished && b.isFinished) return -1;
+      if (a.isFinished && !b.isFinished) return 1;
+
+      return new Date(a.kickoffAt) - new Date(b.kickoffAt);
+    });
+
     return { metas: filtered };
   } catch (err) {
     console.error('[xoiche catalog] error:', err.message);
@@ -246,7 +373,7 @@ async function getLogoDataUri(url) {
 }
 
 /*
- * POSTER PNG GENERATOR
+ * POSTER PNG GENERATOR (TỰ ĐỘNG HIỂN THỊ TỶ SỐ NẾU ĐANG LIVE)
  */
 async function createPosterPNG(slug) {
   const cached = posterCache.get(slug);
@@ -289,6 +416,24 @@ async function createPosterPNG(slug) {
       const homeFontSize = getTeamFontSize(homeName);
       const awayFontSize = getTeamFontSize(awayName);
 
+      // Thiết kế phần giữa poster: VS hoặc TỶ SỐ TRỰC TIẾP
+      let centerScoreSvg = '';
+      if (match.isLive) {
+        centerScoreSvg = `
+    <text x="300" y="340" text-anchor="middle" fill="#ef4444" font-family="Arial, sans-serif" font-size="22" font-weight="bold">🔴 LIVE ${escapeXml(match.statusText)}</text>
+    <text x="300" y="395" text-anchor="middle" fill="#facc15" font-family="Arial, sans-serif" font-size="44" font-weight="bold">${escapeXml(match.scoreDisplay)}</text>
+        `;
+      } else if (match.isFinished) {
+        centerScoreSvg = `
+    <text x="300" y="340" text-anchor="middle" fill="#94a3b8" font-family="Arial, sans-serif" font-size="18" font-weight="bold">FULL TIME</text>
+    <text x="300" y="395" text-anchor="middle" fill="#facc15" font-family="Arial, sans-serif" font-size="44" font-weight="bold">${escapeXml(match.scoreDisplay)}</text>
+        `;
+      } else {
+        centerScoreSvg = `
+    <text x="300" y="365" text-anchor="middle" fill="#facc15" font-family="Arial, sans-serif" font-size="42" font-weight="bold">VS</text>
+        `;
+      }
+
       const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="600" height="900" viewBox="0 0 600 900">
   <defs>
@@ -309,7 +454,9 @@ async function createPosterPNG(slug) {
 
   <text x="190" y="490" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="${homeFontSize}" font-weight="bold">${escapeXml(homeName)}</text>
   <text x="410" y="490" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="${awayFontSize}" font-weight="bold">${escapeXml(awayName)}</text>
-  <text x="300" y="365" text-anchor="middle" fill="#facc15" font-family="Arial, sans-serif" font-size="42" font-weight="bold">VS</text>
+  
+  ${centerScoreSvg}
+
   <text x="300" y="610" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="48" font-weight="bold">${kickoffTime}</text>
   <text x="300" y="655" text-anchor="middle" fill="#cbd5e1" font-family="Arial, sans-serif" font-size="25">${kickoffDate}</text>
   <rect x="80" y="730" width="440" height="2" fill="#475569"/>
@@ -317,7 +464,11 @@ async function createPosterPNG(slug) {
 </svg>`;
 
       const png = await sharp(Buffer.from(svg)).png().toBuffer();
-      posterCache.set(slug, png);
+
+      // Nếu đang LIVE, cache poster ngắn (60s) để cập nhật tỷ số
+      const posterTtl = match.isLive ? LIVE_POSTER_CACHE_TTL : POSTER_CACHE_TTL;
+      posterCache.set(slug, png, posterTtl);
+
       return png;
     } finally {
       inFlightPosters.delete(slug);
@@ -431,9 +582,13 @@ async function handleRequest(req, res, requestUrl) {
         return res.end('Poster not found');
       }
 
+      // Kiểm tra trận đấu có đang live không để set Cache-Control phù hợp
+      const match = matchesCache.matches.find(m => m.id === `xoiche:${slug}`);
+      const maxAge = match?.isLive ? 60 : 86400;
+
       res.writeHead(200, {
         'content-type': 'image/png',
-        'cache-control': 'public, max-age=86400',
+        'cache-control': `public, max-age=${maxAge}`,
         'access-control-allow-origin': '*'
       });
       return res.end(png);
@@ -446,7 +601,6 @@ async function handleRequest(req, res, requestUrl) {
 
   // 3. Stremio Addon Router (/manifest.json, /catalog/..., /meta/..., /stream/...)
   const originalUrl = req.url;
-  // Cắt tiền tố /xoiche để router của stremio-addon-sdk xử lý
   req.url = req.url.slice('/xoiche'.length) || '/';
 
   try {
