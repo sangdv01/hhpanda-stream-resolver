@@ -233,7 +233,7 @@ const dateFormatter = new Intl.DateTimeFormat('vi-VN', {
 
 const builder = new addonBuilder({
   id: 'community.xoiche',
-  version: '1.6.1',
+  version: '1.6.2',
   name: 'Xôi Chè Live',
   description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea (Tỷ số LiveScore & Đa nguồn Xoilac HD)',
   resources: ['catalog', 'meta', 'stream'],
@@ -449,17 +449,9 @@ async function getMatchesFromLiveScore(posterBase) {
 }
 
 /*
- * GET MATCHES (HỢP NHẤT LIVESCORE & XOICHE VỚI GỘP IN-FLIGHT REQUEST)
+ * REFRESH MATCHES (CHẠY SONG SONG LIVESCORE & XOICHE, KHÔNG CHỜ TIMEOUT)
  */
-async function getRawMatches(baseUrl) {
-  const hasLiveMatch = matchesCache.matches.some(m => m.isLive);
-  const cacheTtl = hasLiveMatch ? LIVE_MATCHES_CACHE_TTL : DEFAULT_MATCHES_CACHE_TTL;
-
-  if (matchesCache.matches.length > 0 && Date.now() - matchesCache.time < cacheTtl) {
-    return matchesCache;
-  }
-
-  // Nếu đang có 1 request lấy matches thì các request khác (meta/stream) dùng chung
+async function refreshMatches(baseUrl) {
   if (rawMatchesPromise) {
     return rawMatchesPromise;
   }
@@ -468,102 +460,33 @@ async function getRawMatches(baseUrl) {
     try {
       const posterBase = baseUrl || currentPublicBase || getPublicBaseUrl();
 
-      // 1. Tải LiveScore trước: 100% chuẩn tỷ số, giờ đá, logo HD
+      // 1. Tải LiveScore siêu tốc (chỉ ~150ms trên Azure)
       const liveScoreMatches = await getMatchesFromLiveScore(posterBase);
 
-      // 2. Thử gọi Xôi Chè (timeout ngắn 3500ms) để lấy fixtureId nếu Xôi Chè sống
-      let xoicheMatches = [];
-      try {
-        const response = await httpClient.get(`${XOICHE}/api/matches?filter=all`, {
-          headers: HEADERS,
-          timeout: 3500
-        });
+      // 2. Gọi Xôi Chè trong nền (không chặn catalog người dùng) để lấy fixtureId
+      httpClient.get(`${XOICHE}/api/matches?filter=all`, {
+        headers: HEADERS,
+        timeout: 2500
+      }).then(response => {
         const data = response.data || {};
-        xoicheMatches = [
+        const xoicheMatches = [
           ...(Array.isArray(data.live) ? data.live : []),
           ...(Array.isArray(data.spotlight) ? data.spotlight : []),
           ...(Array.isArray(data.scoreboard) ? data.scoreboard : []),
           ...(Array.isArray(data.pinned) ? data.pinned : [])
         ];
-      } catch (err) {
-        // Xôi Chè lỗi hoặc 503 - hoàn toàn không ảnh hưởng vì đã có LiveScore
-      }
-
-      // Lưu fixtureId từ Xôi Chè
-      for (const m of xoicheMatches) {
-        if (m?.slug && m?.id) {
-          globalSlugToId.set(m.slug, m.id);
+        for (const m of xoicheMatches) {
+          if (m?.slug && m?.id) {
+            globalSlugToId.set(m.slug, m.id);
+          }
         }
-      }
+      }).catch(() => {});
 
       let unique = [];
       if (liveScoreMatches.length > 0) {
         unique = liveScoreMatches;
-        // Ánh xạ thêm ID Xôi Chè nếu tìm thấy trận tương ứng
-        for (const lm of unique) {
-          const xm = xoicheMatches.find(x =>
-            (matchTeam(x.homeTeam?.name, lm.homeName) || matchTeam(x.slug, lm.homeName)) &&
-            (matchTeam(x.awayTeam?.name, lm.awayName) || matchTeam(x.slug, lm.awayName))
-          );
-          if (xm) {
-            const rawSlug = lm.id.replace('xoiche:', '');
-            globalSlugToId.set(rawSlug, xm.id);
-            if (xm.slug) globalSlugToId.set(xm.slug, xm.id);
-          }
-        }
-      } else if (xoicheMatches.length > 0) {
-        const seen = new Set();
-        for (const match of xoicheMatches) {
-          if (!match || match.sport !== 'football' || !match.id || !match.slug) continue;
-          if (seen.has(match.id)) continue;
-          seen.add(match.id);
-
-          globalSlugToId.set(match.slug, match.id);
-
-          const homeName = match.homeTeam?.name || '';
-          const awayName = match.awayTeam?.name || '';
-          if (!homeName || !awayName) continue;
-
-          const kickoff = new Date(match.kickoffAt);
-          const kickoffTime = timeFormatter.format(kickoff);
-          const kickoffDate = dateFormatter.format(kickoff);
-
-          const scoreInfo = parseScoreInfo(match);
-
-          const displayName = scoreInfo.badge
-            ? `${scoreInfo.badge} ${homeName} vs ${awayName}`
-            : `${homeName} vs ${awayName}`;
-
-          let description = `${homeName} vs ${awayName}\n`;
-          if (scoreInfo.isLive || scoreInfo.isFinished) {
-            description += `Tỷ số: ${match.homeScore ?? 0} - ${match.awayScore ?? 0}\n`;
-            description += `Trạng thái: ${scoreInfo.detailStatus}\n`;
-          }
-          description += `Giải đấu: ${match.competition?.name || 'Bóng đá'}\n`;
-          description += `Giờ đá: ${kickoffTime} - ${kickoffDate}`;
-
-          unique.push({
-            id: `xoiche:${match.slug}`,
-            type: 'movie',
-            name: displayName,
-            homeName,
-            awayName,
-            description,
-            releaseInfo: match.kickoffAt,
-            website: `${XOICHE}/tran-dau/${encodeURIComponent(match.slug)}`,
-            homeLogo: match.homeTeam?.logoUrl || getTeamBadge(homeName),
-            awayLogo: match.awayTeam?.logoUrl || getTeamBadge(awayName),
-            kickoffAt: match.kickoffAt,
-            competition: match.competition?.name || '',
-            competitionSlug: match.competition?.slug || '',
-            competitionLogo: match.competition?.logoUrl || '',
-            poster: `${posterBase}/poster/${encodeURIComponent(match.slug)}.png`,
-            isLive: scoreInfo.isLive,
-            isFinished: scoreInfo.isFinished,
-            statusText: scoreInfo.statusText,
-            scoreDisplay: scoreInfo.scoreDisplay
-          });
-        }
+      } else if (matchesCache.matches.length > 0 && matchesCache.time > 0) {
+        unique = matchesCache.matches;
       } else {
         unique = INITIAL_FALLBACK_MATCHES.map(m => ({
           ...m,
@@ -579,9 +502,15 @@ async function getRawMatches(baseUrl) {
         slugToFixtureId: globalSlugToId
       };
 
+      // Tự động làm nóng (pre-warm) trước ảnh poster trong RAM
+      for (const m of unique) {
+        const s = m.id.replace('xoiche:', '');
+        createPosterPNG(s).catch(() => {});
+      }
+
       return matchesCache;
     } catch (err) {
-      console.error('[getRawMatches error]:', err.message);
+      console.error('[refreshMatches error]:', err.message);
       matchesCache.time = Date.now();
       return matchesCache;
     } finally {
@@ -590,6 +519,28 @@ async function getRawMatches(baseUrl) {
   })();
 
   return rawMatchesPromise;
+}
+
+/*
+ * GET RAW MATCHES (STALE-WHILE-REVALIDATE: PHẢN HỒI TỨC THÌ 0MS)
+ */
+async function getRawMatches(baseUrl) {
+  const hasLiveMatch = matchesCache.matches.some(m => m.isLive);
+  const cacheTtl = hasLiveMatch ? LIVE_MATCHES_CACHE_TTL : DEFAULT_MATCHES_CACHE_TTL;
+
+  // 1. Nếu đã có cache và còn mới -> trả về ngay 0ms
+  if (matchesCache.time > 0 && Date.now() - matchesCache.time < cacheTtl) {
+    return matchesCache;
+  }
+
+  // 2. Nếu đã có cache nhưng hết hạn (stale) -> trả về ngay cache cũ 0ms, cập nhật ngầm
+  if (matchesCache.time > 0 && matchesCache.matches.length > 0) {
+    refreshMatches(baseUrl).catch(() => {});
+    return matchesCache;
+  }
+
+  // 3. Khởi động lạnh (cold start) lần đầu tiên chưa có gì -> mới phải chờ LiveScore nạp
+  return refreshMatches(baseUrl);
 }
 
 /*
@@ -1161,6 +1112,11 @@ async function handleRequest(req, res, requestUrl) {
     }
   }
 }
+
+// Tự động làm nóng cache ngay khi server khởi động
+setTimeout(() => {
+  refreshMatches().catch(() => {});
+}, 150);
 
 module.exports = {
   handleRequest,
