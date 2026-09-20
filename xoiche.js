@@ -73,39 +73,99 @@ let rawMatchesPromise = null; // Gộp request meta và stream nếu đến cùn
 // Bảng ánh xạ vĩnh viễn slug -> fixtureId để KHÔNG BAO GIỜ phải cào HTML
 const globalSlugToId = new Map();
 
+const EPL_BADGES = {
+  'arsenal': 'https://resources.premierleague.com/premierleague/badges/50/t3.png',
+  'aston-villa': 'https://resources.premierleague.com/premierleague/badges/50/t7.png',
+  'bournemouth': 'https://resources.premierleague.com/premierleague/badges/50/t91.png',
+  'brentford': 'https://resources.premierleague.com/premierleague/badges/50/t94.png',
+  'brighton': 'https://resources.premierleague.com/premierleague/badges/50/t36.png',
+  'chelsea': 'https://resources.premierleague.com/premierleague/badges/50/t8.png',
+  'crystal-palace': 'https://resources.premierleague.com/premierleague/badges/50/t31.png',
+  'everton': 'https://resources.premierleague.com/premierleague/badges/50/t11.png',
+  'fulham': 'https://resources.premierleague.com/premierleague/badges/50/t54.png',
+  'ipswich': 'https://resources.premierleague.com/premierleague/badges/50/t40.png',
+  'leicester': 'https://resources.premierleague.com/premierleague/badges/50/t13.png',
+  'liverpool': 'https://resources.premierleague.com/premierleague/badges/50/t14.png',
+  'manchester-city': 'https://resources.premierleague.com/premierleague/badges/50/t43.png',
+  'manchester-united': 'https://resources.premierleague.com/premierleague/badges/50/t1.png',
+  'newcastle': 'https://resources.premierleague.com/premierleague/badges/50/t4.png',
+  'nottingham-forest': 'https://resources.premierleague.com/premierleague/badges/50/t17.png',
+  'southampton': 'https://resources.premierleague.com/premierleague/badges/50/t20.png',
+  'tottenham': 'https://resources.premierleague.com/premierleague/badges/50/t6.png',
+  'west-ham': 'https://resources.premierleague.com/premierleague/badges/50/t21.png',
+  'wolves': 'https://resources.premierleague.com/premierleague/badges/50/t39.png',
+  'wolverhampton': 'https://resources.premierleague.com/premierleague/badges/50/t39.png',
+  'leeds': 'https://resources.premierleague.com/premierleague/badges/50/t2.png',
+  'sunderland': 'https://resources.premierleague.com/premierleague/badges/50/t56.png'
+};
+
+function getTeamBadge(teamName) {
+  const norm = (teamName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const [key, url] of Object.entries(EPL_BADGES)) {
+    const cleanKey = key.replace(/[^a-z0-9]/g, '');
+    if (norm.includes(cleanKey) || cleanKey.includes(norm)) {
+      return url;
+    }
+  }
+  return '';
+}
+
+const DEFAULT_REMOTE_HOST = 'hhpanda-resolver.purplecliff-189df27e.southeastasia.azurecontainerapps.io';
+
 const INITIAL_FALLBACK_MATCHES = [
   {
     id: 'xoiche:bournemouth-v-liverpool-1557407',
     type: 'movie',
-    name: 'Bournemouth vs Liverpool',
+    name: '[FT 0-1] Bournemouth vs Liverpool',
     homeName: 'Bournemouth',
     awayName: 'Liverpool',
-    description: 'Bournemouth vs Liverpool\nGiải đấu: Premier League',
+    description: 'Bournemouth vs Liverpool\nTỷ số: 0 - 1\nTrạng thái: Đã kết thúc (FT)\nGiải đấu: Premier League\nGiờ đá: 20:00 - 20/09/2026',
     competition: 'Premier League',
     competitionSlug: 'premier-league-39',
-    kickoffAt: '2026-09-20T13:00:00.000Z'
+    kickoffAt: '2026-09-20T13:00:00.000Z',
+    isLive: false,
+    isFinished: true,
+    statusText: 'FT',
+    scoreDisplay: '0 - 1',
+    homeLogo: 'https://resources.premierleague.com/premierleague/badges/50/t91.png',
+    awayLogo: 'https://resources.premierleague.com/premierleague/badges/50/t14.png',
+    poster: `https://${DEFAULT_REMOTE_HOST}/xoiche/poster/bournemouth-v-liverpool-1557407.png`
   },
   {
     id: 'xoiche:leeds-v-crystal-palace-1557412',
     type: 'movie',
-    name: 'Leeds vs Crystal Palace',
+    name: '[FT 0-0] Leeds vs Crystal Palace',
     homeName: 'Leeds',
     awayName: 'Crystal Palace',
-    description: 'Leeds vs Crystal Palace\nGiải đấu: Premier League',
+    description: 'Leeds vs Crystal Palace\nTỷ số: 0 - 0\nTrạng thái: Đã kết thúc (FT)\nGiải đấu: Premier League\nGiờ đá: 20:00 - 20/09/2026',
     competition: 'Premier League',
     competitionSlug: 'premier-league-39',
-    kickoffAt: '2026-09-20T13:00:00.000Z'
+    kickoffAt: '2026-09-20T13:00:00.000Z',
+    isLive: false,
+    isFinished: true,
+    statusText: 'FT',
+    scoreDisplay: '0 - 0',
+    homeLogo: 'https://resources.premierleague.com/premierleague/badges/50/t2.png',
+    awayLogo: 'https://resources.premierleague.com/premierleague/badges/50/t31.png',
+    poster: `https://${DEFAULT_REMOTE_HOST}/xoiche/poster/leeds-v-crystal-palace-1557412.png`
   },
   {
     id: 'xoiche:manchester-city-v-sunderland-1557413',
     type: 'movie',
-    name: 'Manchester City vs Sunderland',
+    name: '[FT 5-3] Manchester City vs Sunderland',
     homeName: 'Manchester City',
     awayName: 'Sunderland',
-    description: 'Manchester City vs Sunderland\nGiải đấu: Premier League',
+    description: 'Manchester City vs Sunderland\nTỷ số: 5 - 3\nTrạng thái: Đã kết thúc (FT)\nGiải đấu: Premier League\nGiờ đá: 20:00 - 20/09/2026',
     competition: 'Premier League',
     competitionSlug: 'premier-league-39',
-    kickoffAt: '2026-09-20T13:00:00.000Z'
+    kickoffAt: '2026-09-20T13:00:00.000Z',
+    isLive: false,
+    isFinished: true,
+    statusText: 'FT',
+    scoreDisplay: '5 - 3',
+    homeLogo: 'https://resources.premierleague.com/premierleague/badges/50/t43.png',
+    awayLogo: 'https://resources.premierleague.com/premierleague/badges/50/t56.png',
+    poster: `https://${DEFAULT_REMOTE_HOST}/xoiche/poster/manchester-city-v-sunderland-1557413.png`
   },
   {
     id: 'xoiche:fulham-v-manchester-united-1557411',
@@ -113,10 +173,17 @@ const INITIAL_FALLBACK_MATCHES = [
     name: 'Fulham vs Manchester United',
     homeName: 'Fulham',
     awayName: 'Manchester United',
-    description: 'Fulham vs Manchester United\nGiải đấu: Premier League',
+    description: 'Fulham vs Manchester United\nGiải đấu: Premier League\nGiờ đá: 22:30 - 20/09/2026',
     competition: 'Premier League',
     competitionSlug: 'premier-league-39',
-    kickoffAt: '2026-09-20T15:30:00.000Z'
+    kickoffAt: '2026-09-20T15:30:00.000Z',
+    isLive: false,
+    isFinished: false,
+    statusText: '',
+    scoreDisplay: '0 - 0',
+    homeLogo: 'https://resources.premierleague.com/premierleague/badges/50/t54.png',
+    awayLogo: 'https://resources.premierleague.com/premierleague/badges/50/t1.png',
+    poster: `https://${DEFAULT_REMOTE_HOST}/xoiche/poster/fulham-v-manchester-united-1557411.png`
   }
 ];
 
@@ -127,6 +194,7 @@ let matchesCache = {
 };
 
 let currentPublicBase = '';
+let currentHost = '';
 
 function getPublicBaseUrl(req) {
   if (process.env.AZURE_PUBLIC_URL) {
@@ -135,8 +203,11 @@ function getPublicBaseUrl(req) {
   if (process.env.RENDER_EXTERNAL_HOSTNAME) {
     return `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/xoiche`;
   }
-  const host = req?.headers?.host || `127.0.0.1:${process.env.PORT || 7000}`;
-  const proto = req?.headers?.['x-forwarded-proto'] || 'http';
+  const host = req?.headers?.host || currentHost || DEFAULT_REMOTE_HOST;
+  if (req?.headers?.host && !req.headers.host.includes('127.0.0.1')) {
+    currentHost = req.headers.host;
+  }
+  const proto = req?.headers?.['x-forwarded-proto'] || (host.includes('127.0.0.1') ? 'http' : 'https');
   return `${proto}://${host}/xoiche`;
 }
 
@@ -162,9 +233,9 @@ const dateFormatter = new Intl.DateTimeFormat('vi-VN', {
 
 const builder = new addonBuilder({
   id: 'community.xoiche',
-  version: '1.6.0',
+  version: '1.6.1',
   name: 'Xôi Chè Live',
-  description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea (Đa nguồn Xôi Chè & Xoilac HD, Tỷ số trực tiếp)',
+  description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea (Tỷ số LiveScore & Đa nguồn Xoilac HD)',
   resources: ['catalog', 'meta', 'stream'],
   types: ['movie'],
   catalogs: [
@@ -254,8 +325,131 @@ function parseScoreInfo(match) {
   };
 }
 
+function parseLiveScoreDate(esd) {
+  const str = String(esd || '');
+  if (str.length >= 14) {
+    const y = parseInt(str.slice(0, 4), 10);
+    const m = parseInt(str.slice(4, 6), 10) - 1;
+    const d = parseInt(str.slice(6, 8), 10);
+    const h = parseInt(str.slice(8, 10), 10);
+    const min = parseInt(str.slice(10, 12), 10);
+    const s = parseInt(str.slice(12, 14), 10);
+    return new Date(Date.UTC(y, m, d, h, min, s)).toISOString();
+  }
+  return new Date().toISOString();
+}
+
 /*
- * GET MATCHES TỪ API XOICHE (CÓ GỘP REQUEST IN-FLIGHT)
+ * GET MATCHES TỪ LIVESCORE (SIÊU TỐC ~150MS, CHUẨN TỶ SỐ TRỰC TIẾP & LOGO HD)
+ */
+async function getMatchesFromLiveScore(posterBase) {
+  try {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const url = `https://prod-public-api.livescore.com/v1/api/app/date/soccer/${today}/0?locale=en`;
+    const res = await httpClient.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 4000
+    });
+    const stages = res.data?.Stages || [];
+    const matches = [];
+
+    for (const st of stages) {
+      const isEpl = st.Scd === 'premier-league' && st.Ccd === 'england';
+      for (const ev of st.Events || []) {
+        const homeName = ev.T1?.[0]?.Nm || '';
+        const awayName = ev.T2?.[0]?.Nm || '';
+        const isChelsea = (homeName === 'Chelsea' || awayName === 'Chelsea');
+        if (!isEpl && !isChelsea) continue;
+
+        const homeScore = parseInt(ev.Tr1 ?? 0, 10);
+        const awayScore = parseInt(ev.Tr2 ?? 0, 10);
+        const eps = (ev.Eps || '').toUpperCase();
+        const elapsed = ev.Min ? `${ev.Min}'` : '';
+
+        let isLive = false;
+        let isFinished = false;
+        let badge = '';
+        let statusText = '';
+        let scoreDisplay = `${homeScore} - ${awayScore}`;
+        let detailStatus = 'Chưa diễn ra';
+
+        if (eps === 'FT' || eps === 'AET' || eps === 'AP') {
+          isFinished = true;
+          badge = `[FT ${homeScore}-${awayScore}]`;
+          statusText = 'FT';
+          detailStatus = 'Đã kết thúc (FT)';
+        } else if (eps === 'HT') {
+          isLive = true;
+          badge = `[HT ${homeScore}-${awayScore}]`;
+          statusText = 'HT';
+          detailStatus = 'Nghỉ giữa hiệp (HT)';
+        } else if (eps === '1H' || eps === '2H' || eps === 'LIVE' || (!isNaN(parseInt(eps, 10)) && parseInt(eps, 10) > 0)) {
+          isLive = true;
+          const currentMin = elapsed || (eps.includes('H') ? eps : `${eps}'`);
+          badge = `🔴 [${currentMin} ${homeScore}-${awayScore}]`;
+          statusText = currentMin;
+          detailStatus = `Đang diễn ra (${currentMin})`;
+        } else if (eps === 'NS') {
+          detailStatus = 'Sắp diễn ra';
+        }
+
+        const kickoffAt = parseLiveScoreDate(ev.Esd);
+        const kickoff = new Date(kickoffAt);
+        const kickoffTime = timeFormatter.format(kickoff);
+        const kickoffDate = dateFormatter.format(kickoff);
+
+        const homeSlug = homeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const awaySlug = awayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const slug = `${homeSlug}-v-${awaySlug}-${ev.Eid}`;
+
+        const displayName = badge ? `${badge} ${homeName} vs ${awayName}` : `${homeName} vs ${awayName}`;
+
+        const compTitle = isEpl ? 'Premier League' : (st.Snm || 'Bóng đá');
+        const compSlug = isEpl ? 'premier-league' : (st.Scd || 'football');
+
+        const homeImg = ev.T1?.[0]?.Img ? `https://lsm-static-prod.livescore.com/medium/${ev.T1[0].Img}` : '';
+        const awayImg = ev.T2?.[0]?.Img ? `https://lsm-static-prod.livescore.com/medium/${ev.T2[0].Img}` : '';
+        const homeLogo = getTeamBadge(homeName) || homeImg;
+        const awayLogo = getTeamBadge(awayName) || awayImg;
+
+        let description = `${homeName} vs ${awayName}\n`;
+        if (isLive || isFinished) {
+          description += `Tỷ số: ${homeScore} - ${awayScore}\n`;
+          description += `Trạng thái: ${detailStatus}\n`;
+        }
+        description += `Giải đấu: ${compTitle}\n`;
+        description += `Giờ đá: ${kickoffTime} - ${kickoffDate}`;
+
+        matches.push({
+          id: `xoiche:${slug}`,
+          type: 'movie',
+          name: displayName,
+          homeName,
+          awayName,
+          description,
+          releaseInfo: kickoffAt,
+          homeLogo,
+          awayLogo,
+          kickoffAt,
+          competition: compTitle,
+          competitionSlug: compSlug,
+          poster: `${posterBase}/poster/${encodeURIComponent(slug)}.png`,
+          isLive,
+          isFinished,
+          statusText,
+          scoreDisplay
+        });
+      }
+    }
+    return matches;
+  } catch (err) {
+    console.error('[livescore api error]:', err.message);
+    return [];
+  }
+}
+
+/*
+ * GET MATCHES (HỢP NHẤT LIVESCORE & XOICHE VỚI GỘP IN-FLIGHT REQUEST)
  */
 async function getRawMatches(baseUrl) {
   const hasLiveMatch = matchesCache.matches.some(m => m.isLive);
@@ -272,88 +466,122 @@ async function getRawMatches(baseUrl) {
 
   rawMatchesPromise = (async () => {
     try {
-      const response = await httpClient.get(`${XOICHE}/api/matches?filter=all`, {
-        headers: HEADERS,
-        timeout: 18000
-      });
-
-      const data = response.data || {};
-      const rawMatches = [
-        ...(Array.isArray(data.live) ? data.live : []),
-        ...(Array.isArray(data.spotlight) ? data.spotlight : []),
-        ...(Array.isArray(data.scoreboard) ? data.scoreboard : []),
-        ...(Array.isArray(data.pinned) ? data.pinned : [])
-      ];
-
-      const unique = [];
-      const seen = new Set();
-      const slugMap = new Map();
       const posterBase = baseUrl || currentPublicBase || getPublicBaseUrl();
 
-      for (const match of rawMatches) {
-        if (!match || match.sport !== 'football' || !match.id || !match.slug) continue;
-        if (seen.has(match.id)) continue;
-        seen.add(match.id);
+      // 1. Tải LiveScore trước: 100% chuẩn tỷ số, giờ đá, logo HD
+      const liveScoreMatches = await getMatchesFromLiveScore(posterBase);
 
-        // Lưu cả vào bảng slugMap hiện tại và bảng global vĩnh viễn
-        slugMap.set(match.slug, match.id);
-        globalSlugToId.set(match.slug, match.id);
-
-        const homeName = match.homeTeam?.name || '';
-        const awayName = match.awayTeam?.name || '';
-        if (!homeName || !awayName) continue;
-
-        const kickoff = new Date(match.kickoffAt);
-        const kickoffTime = timeFormatter.format(kickoff);
-        const kickoffDate = dateFormatter.format(kickoff);
-
-        const scoreInfo = parseScoreInfo(match);
-
-        const displayName = scoreInfo.badge
-          ? `${scoreInfo.badge} ${homeName} vs ${awayName}`
-          : `${homeName} vs ${awayName}`;
-
-        let description = `${homeName} vs ${awayName}\n`;
-        if (scoreInfo.isLive || scoreInfo.isFinished) {
-          description += `Tỷ số: ${match.homeScore ?? 0} - ${match.awayScore ?? 0}\n`;
-          description += `Trạng thái: ${scoreInfo.detailStatus}\n`;
-        }
-        description += `Giải đấu: ${match.competition?.name || 'Bóng đá'}\n`;
-        description += `Giờ đá: ${kickoffTime} - ${kickoffDate}`;
-
-        unique.push({
-          id: `xoiche:${match.slug}`,
-          type: 'movie',
-          name: displayName,
-          homeName,
-          awayName,
-          description,
-          releaseInfo: match.kickoffAt,
-          website: `${XOICHE}/tran-dau/${encodeURIComponent(match.slug)}`,
-          homeLogo: match.homeTeam?.logoUrl || '',
-          awayLogo: match.awayTeam?.logoUrl || '',
-          kickoffAt: match.kickoffAt,
-          competition: match.competition?.name || '',
-          competitionSlug: match.competition?.slug || '',
-          competitionLogo: match.competition?.logoUrl || '',
-          poster: `${posterBase}/poster/${encodeURIComponent(match.slug)}.png`,
-          isLive: scoreInfo.isLive,
-          isFinished: scoreInfo.isFinished,
-          statusText: scoreInfo.statusText,
-          scoreDisplay: scoreInfo.scoreDisplay
+      // 2. Thử gọi Xôi Chè (timeout ngắn 3500ms) để lấy fixtureId nếu Xôi Chè sống
+      let xoicheMatches = [];
+      try {
+        const response = await httpClient.get(`${XOICHE}/api/matches?filter=all`, {
+          headers: HEADERS,
+          timeout: 3500
         });
+        const data = response.data || {};
+        xoicheMatches = [
+          ...(Array.isArray(data.live) ? data.live : []),
+          ...(Array.isArray(data.spotlight) ? data.spotlight : []),
+          ...(Array.isArray(data.scoreboard) ? data.scoreboard : []),
+          ...(Array.isArray(data.pinned) ? data.pinned : [])
+        ];
+      } catch (err) {
+        // Xôi Chè lỗi hoặc 503 - hoàn toàn không ảnh hưởng vì đã có LiveScore
+      }
+
+      // Lưu fixtureId từ Xôi Chè
+      for (const m of xoicheMatches) {
+        if (m?.slug && m?.id) {
+          globalSlugToId.set(m.slug, m.id);
+        }
+      }
+
+      let unique = [];
+      if (liveScoreMatches.length > 0) {
+        unique = liveScoreMatches;
+        // Ánh xạ thêm ID Xôi Chè nếu tìm thấy trận tương ứng
+        for (const lm of unique) {
+          const xm = xoicheMatches.find(x =>
+            (matchTeam(x.homeTeam?.name, lm.homeName) || matchTeam(x.slug, lm.homeName)) &&
+            (matchTeam(x.awayTeam?.name, lm.awayName) || matchTeam(x.slug, lm.awayName))
+          );
+          if (xm) {
+            const rawSlug = lm.id.replace('xoiche:', '');
+            globalSlugToId.set(rawSlug, xm.id);
+            if (xm.slug) globalSlugToId.set(xm.slug, xm.id);
+          }
+        }
+      } else if (xoicheMatches.length > 0) {
+        const seen = new Set();
+        for (const match of xoicheMatches) {
+          if (!match || match.sport !== 'football' || !match.id || !match.slug) continue;
+          if (seen.has(match.id)) continue;
+          seen.add(match.id);
+
+          globalSlugToId.set(match.slug, match.id);
+
+          const homeName = match.homeTeam?.name || '';
+          const awayName = match.awayTeam?.name || '';
+          if (!homeName || !awayName) continue;
+
+          const kickoff = new Date(match.kickoffAt);
+          const kickoffTime = timeFormatter.format(kickoff);
+          const kickoffDate = dateFormatter.format(kickoff);
+
+          const scoreInfo = parseScoreInfo(match);
+
+          const displayName = scoreInfo.badge
+            ? `${scoreInfo.badge} ${homeName} vs ${awayName}`
+            : `${homeName} vs ${awayName}`;
+
+          let description = `${homeName} vs ${awayName}\n`;
+          if (scoreInfo.isLive || scoreInfo.isFinished) {
+            description += `Tỷ số: ${match.homeScore ?? 0} - ${match.awayScore ?? 0}\n`;
+            description += `Trạng thái: ${scoreInfo.detailStatus}\n`;
+          }
+          description += `Giải đấu: ${match.competition?.name || 'Bóng đá'}\n`;
+          description += `Giờ đá: ${kickoffTime} - ${kickoffDate}`;
+
+          unique.push({
+            id: `xoiche:${match.slug}`,
+            type: 'movie',
+            name: displayName,
+            homeName,
+            awayName,
+            description,
+            releaseInfo: match.kickoffAt,
+            website: `${XOICHE}/tran-dau/${encodeURIComponent(match.slug)}`,
+            homeLogo: match.homeTeam?.logoUrl || getTeamBadge(homeName),
+            awayLogo: match.awayTeam?.logoUrl || getTeamBadge(awayName),
+            kickoffAt: match.kickoffAt,
+            competition: match.competition?.name || '',
+            competitionSlug: match.competition?.slug || '',
+            competitionLogo: match.competition?.logoUrl || '',
+            poster: `${posterBase}/poster/${encodeURIComponent(match.slug)}.png`,
+            isLive: scoreInfo.isLive,
+            isFinished: scoreInfo.isFinished,
+            statusText: scoreInfo.statusText,
+            scoreDisplay: scoreInfo.scoreDisplay
+          });
+        }
+      } else {
+        unique = INITIAL_FALLBACK_MATCHES.map(m => ({
+          ...m,
+          poster: `${posterBase}/poster/${encodeURIComponent(m.id.replace('xoiche:', ''))}.png`,
+          homeLogo: getTeamBadge(m.homeName),
+          awayLogo: getTeamBadge(m.awayName)
+        }));
       }
 
       matchesCache = {
         time: Date.now(),
         matches: unique,
-        slugToFixtureId: slugMap
+        slugToFixtureId: globalSlugToId
       };
 
       return matchesCache;
     } catch (err) {
-      console.error('[xoiche api error]:', err.message);
-      // Khi Xôi Chè 502 / timeout, đặt lại time để giữ cache cũ và không spam
+      console.error('[getRawMatches error]:', err.message);
       matchesCache.time = Date.now();
       return matchesCache;
     } finally {
@@ -470,8 +698,22 @@ async function createPosterPNG(slug) {
   const task = (async () => {
     try {
       const { matches } = await getRawMatches();
-      const match = matches.find(m => m.id === `xoiche:${slug}`);
-      if (!match) return null;
+      let match = matches.find(m => m.id === `xoiche:${slug}`) ||
+                  INITIAL_FALLBACK_MATCHES.find(m => m.id === `xoiche:${slug}`);
+
+      if (!match) {
+        const { home, away } = extractTeamsFromSlug(slug);
+        match = {
+          homeName: home || 'Đội nhà',
+          awayName: away || 'Đội khách',
+          kickoffAt: new Date().toISOString(),
+          competition: 'Premier League',
+          scoreDisplay: 'VS',
+          statusText: '',
+          isLive: false,
+          isFinished: false
+        };
+      }
 
       const homeName = match.homeName || '';
       const awayName = match.awayName || '';
@@ -484,8 +726,8 @@ async function createPosterPNG(slug) {
       }[c]));
 
       const [homeLogo, awayLogo] = await Promise.all([
-        getLogoDataUri(match.homeLogo),
-        getLogoDataUri(match.awayLogo)
+        getLogoDataUri(match.homeLogo || getTeamBadge(homeName)),
+        getLogoDataUri(match.awayLogo || getTeamBadge(awayName))
       ]);
 
       const compDisplay = (match.competition || 'BÓNG ĐÁ').toUpperCase();
@@ -532,8 +774,8 @@ async function createPosterPNG(slug) {
   <circle cx="190" cy="315" r="125" fill="white" opacity="0.96"/>
   <circle cx="410" cy="315" r="125" fill="white" opacity="0.96"/>
   
-  ${homeLogo ? `<image x="90" y="215" width="200" height="200" preserveAspectRatio="xMidYMid meet" href="${homeLogo}"/>` : ''}
-  ${awayLogo ? `<image x="310" y="215" width="200" height="200" preserveAspectRatio="xMidYMid meet" href="${awayLogo}"/>` : ''}
+  ${homeLogo ? `<image x="90" y="215" width="200" height="200" preserveAspectRatio="xMidYMid meet" href="${homeLogo}"/>` : `<text x="190" y="335" text-anchor="middle" fill="#1e293b" font-family="Arial, sans-serif" font-size="64" font-weight="bold">${escapeXml((homeName[0] || '⚽').toUpperCase())}</text>`}
+  ${awayLogo ? `<image x="310" y="215" width="200" height="200" preserveAspectRatio="xMidYMid meet" href="${awayLogo}"/>` : `<text x="410" y="335" text-anchor="middle" fill="#1e293b" font-family="Arial, sans-serif" font-size="64" font-weight="bold">${escapeXml((awayName[0] || '⚽').toUpperCase())}</text>`}
 
   <text x="190" y="490" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="${homeFontSize}" font-weight="bold">${escapeXml(homeName)}</text>
   <text x="410" y="490" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="${awayFontSize}" font-weight="bold">${escapeXml(awayName)}</text>
