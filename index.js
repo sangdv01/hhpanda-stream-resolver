@@ -3,6 +3,7 @@ const http = require('http');
 const crypto = require('crypto');
 const resolver = require('./resolve');
 const yan = require('./yanhh3d');
+const xoiche = require('./xoiche');
 
 const yanStreamMap = new Map();
 
@@ -525,6 +526,10 @@ const server = http.createServer(async (req, res) => {
       `http://${req.headers.host || '0.0.0.0'}`
     );
 
+    // ROUTE CHO XÔI CHÈ LIVE:
+    if (requestUrl.pathname.startsWith('/xoiche')) {
+      return await xoiche.handleRequest(req, res, requestUrl);
+    }
 
     // ROUTE GATEWAY CHO YANHH3D:
     // 1. Phục vụ Playlist: /gateway/yan/:streamId/stream.m3u8
@@ -729,6 +734,10 @@ server.listen(PORT, HOST, () => {
 
   console.log(
     `HTTP addon accessible at: http://${HOST}:${PORT}/manifest.json`
+  );
+
+  console.log(
+    `Xôi Chè addon accessible at: http://${HOST}:${PORT}/xoiche/manifest.json`
   );
 });
 
