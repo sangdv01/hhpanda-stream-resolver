@@ -170,17 +170,17 @@ const INITIAL_FALLBACK_MATCHES = [
   {
     id: 'xoiche:fulham-v-manchester-united-1557411',
     type: 'movie',
-    name: 'Fulham vs Manchester United',
+    name: '[FT 1-1] Fulham vs Manchester United',
     homeName: 'Fulham',
     awayName: 'Manchester United',
-    description: 'Fulham vs Manchester United\nGiải đấu: Premier League\nGiờ đá: 22:30 - 20/09/2026',
+    description: 'Fulham vs Manchester United\nTỷ số: 1 - 1\nTrạng thái: Đã kết thúc (FT)\nGiải đấu: Premier League\nGiờ đá: 22:30 - 20/09/2026',
     competition: 'Premier League',
     competitionSlug: 'premier-league-39',
     kickoffAt: '2026-09-20T15:30:00.000Z',
     isLive: false,
-    isFinished: false,
-    statusText: '',
-    scoreDisplay: '0 - 0',
+    isFinished: true,
+    statusText: 'FT',
+    scoreDisplay: '1 - 1',
     homeLogo: 'https://resources.premierleague.com/premierleague/badges/50/t54.png',
     awayLogo: 'https://resources.premierleague.com/premierleague/badges/50/t1.png',
     poster: `https://${DEFAULT_REMOTE_HOST}/xoiche/poster/fulham-v-manchester-united-1557411.png`
@@ -233,7 +233,7 @@ const dateFormatter = new Intl.DateTimeFormat('vi-VN', {
 
 const builder = new addonBuilder({
   id: 'community.xoiche',
-  version: '1.6.3',
+  version: '1.6.4',
   name: 'Xôi Chè Live',
   description: 'Xem trực tiếp Ngoại Hạng Anh & Chelsea (Tỷ số LiveScore & Đa nguồn Xoilac HD)',
   resources: ['catalog', 'meta', 'stream'],
@@ -345,102 +345,153 @@ function parseLiveScoreDate(esd) {
 async function getMatchesFromLiveScore(posterBase) {
   try {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const url = `https://prod-public-api.livescore.com/v1/api/app/date/soccer/${today}/0?locale=en`;
-    const res = await httpClient.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      timeout: 4000
-    });
-    const stages = res.data?.Stages || [];
-    const matches = [];
+    const [dateRes, stageRes] = await Promise.allSettled([
+      httpClient.get(`https://prod-public-api.livescore.com/v1/api/app/date/soccer/${today}/0?locale=en`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        timeout: 4000
+      }),
+      httpClient.get('https://prod-public-api.livescore.com/v1/api/app/stage/soccer/england/premier-league/1?locale=en', {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        timeout: 4000
+      })
+    ]);
 
-    for (const st of stages) {
-      const isEpl = st.Scd === 'premier-league' && st.Ccd === 'england';
-      for (const ev of st.Events || []) {
-        const homeName = ev.T1?.[0]?.Nm || '';
-        const awayName = ev.T2?.[0]?.Nm || '';
-        const isChelsea = (homeName === 'Chelsea' || awayName === 'Chelsea');
-        if (!isEpl && !isChelsea) continue;
-
-        const homeScore = parseInt(ev.Tr1 ?? 0, 10);
-        const awayScore = parseInt(ev.Tr2 ?? 0, 10);
-        const eps = (ev.Eps || '').toUpperCase();
-        const elapsed = ev.Min ? `${ev.Min}'` : '';
-
-        let isLive = false;
-        let isFinished = false;
-        let badge = '';
-        let statusText = '';
-        let scoreDisplay = `${homeScore} - ${awayScore}`;
-        let detailStatus = 'Chưa diễn ra';
-
-        if (eps === 'FT' || eps === 'AET' || eps === 'AP') {
-          isFinished = true;
-          badge = `[FT ${homeScore}-${awayScore}]`;
-          statusText = 'FT';
-          detailStatus = 'Đã kết thúc (FT)';
-        } else if (eps === 'HT') {
-          isLive = true;
-          badge = `[HT ${homeScore}-${awayScore}]`;
-          statusText = 'HT';
-          detailStatus = 'Nghỉ giữa hiệp (HT)';
-        } else if (eps === '1H' || eps === '2H' || eps === 'LIVE' || (!isNaN(parseInt(eps, 10)) && parseInt(eps, 10) > 0)) {
-          isLive = true;
-          const currentMin = elapsed || (eps.includes('H') ? eps : `${eps}'`);
-          badge = `🔴 [${currentMin} ${homeScore}-${awayScore}]`;
-          statusText = currentMin;
-          detailStatus = `Đang diễn ra (${currentMin})`;
-        } else if (eps === 'NS') {
-          detailStatus = 'Sắp diễn ra';
+    const rawEvents = [];
+    if (dateRes.status === 'fulfilled') {
+      for (const st of dateRes.value.data?.Stages || []) {
+        const isEpl = st.Scd === 'premier-league' && st.Ccd === 'england';
+        for (const ev of st.Events || []) {
+          const homeName = ev.T1?.[0]?.Nm || '';
+          const awayName = ev.T2?.[0]?.Nm || '';
+          const isChelsea = (homeName.includes('Chelsea') || awayName.includes('Chelsea'));
+          if (isEpl || isChelsea) {
+            rawEvents.push({
+              ev,
+              compTitle: isEpl ? 'Premier League' : (st.Snm || 'Bóng đá'),
+              compSlug: isEpl ? 'premier-league' : (st.Scd || 'football')
+            });
+          }
         }
-
-        const kickoffAt = parseLiveScoreDate(ev.Esd);
-        const kickoff = new Date(kickoffAt);
-        const kickoffTime = timeFormatter.format(kickoff);
-        const kickoffDate = dateFormatter.format(kickoff);
-
-        const homeSlug = homeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const awaySlug = awayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const slug = `${homeSlug}-v-${awaySlug}-${ev.Eid}`;
-
-        const displayName = badge ? `${badge} ${homeName} vs ${awayName}` : `${homeName} vs ${awayName}`;
-
-        const compTitle = isEpl ? 'Premier League' : (st.Snm || 'Bóng đá');
-        const compSlug = isEpl ? 'premier-league' : (st.Scd || 'football');
-
-        const homeImg = ev.T1?.[0]?.Img ? `https://lsm-static-prod.livescore.com/medium/${ev.T1[0].Img}` : '';
-        const awayImg = ev.T2?.[0]?.Img ? `https://lsm-static-prod.livescore.com/medium/${ev.T2[0].Img}` : '';
-        const homeLogo = getTeamBadge(homeName) || homeImg;
-        const awayLogo = getTeamBadge(awayName) || awayImg;
-
-        let description = `${homeName} vs ${awayName}\n`;
-        if (isLive || isFinished) {
-          description += `Tỷ số: ${homeScore} - ${awayScore}\n`;
-          description += `Trạng thái: ${detailStatus}\n`;
-        }
-        description += `Giải đấu: ${compTitle}\n`;
-        description += `Giờ đá: ${kickoffTime} - ${kickoffDate}`;
-
-        matches.push({
-          id: `xoiche:${slug}`,
-          type: 'movie',
-          name: displayName,
-          homeName,
-          awayName,
-          description,
-          releaseInfo: kickoffAt,
-          homeLogo,
-          awayLogo,
-          kickoffAt,
-          competition: compTitle,
-          competitionSlug: compSlug,
-          poster: `${posterBase}/poster/${encodeURIComponent(slug)}.png`,
-          isLive,
-          isFinished,
-          statusText,
-          scoreDisplay
-        });
       }
     }
+
+    if (stageRes.status === 'fulfilled') {
+      const st = stageRes.value.data?.Stages?.[0];
+      if (st) {
+        for (const ev of st.Events || []) {
+          rawEvents.push({
+            ev,
+            compTitle: 'Premier League',
+            compSlug: 'premier-league'
+          });
+        }
+      }
+    }
+
+    const seen = new Set();
+    const matches = [];
+    const now = Date.now();
+    const threeDaysAgo = now - 3 * 24 * 3600 * 1000;
+    const sevenDaysLater = now + 7 * 24 * 3600 * 1000;
+
+    for (const item of rawEvents) {
+      const ev = item.ev;
+      if (!ev || !ev.Eid || seen.has(ev.Eid)) continue;
+      seen.add(ev.Eid);
+
+      const homeName = ev.T1?.[0]?.Nm || '';
+      const awayName = ev.T2?.[0]?.Nm || '';
+      if (!homeName || !awayName) continue;
+
+      const kickoffAt = parseLiveScoreDate(ev.Esd);
+      const kickoff = new Date(kickoffAt);
+      const kickoffMs = kickoff.getTime();
+      const timeSinceKickoff = now - kickoffMs;
+      const isPastThreeHours = (timeSinceKickoff > 3 * 3600 * 1000);
+
+      const eps = (ev.Eps || '').toUpperCase();
+      const isCurrentlyLive = (eps === '1H' || eps === '2H' || eps === 'HT' || eps === 'LIVE' || (!isNaN(parseInt(eps, 10)) && parseInt(eps, 10) > 0)) && !isPastThreeHours;
+
+      // Chỉ lấy trận đang live HOẶC diễn ra trong khoảng [-3 ngày, +7 ngày]
+      if (!isCurrentlyLive && (kickoffMs < threeDaysAgo || kickoffMs > sevenDaysLater)) {
+        continue;
+      }
+
+      const homeScore = parseInt(ev.Tr1 ?? 0, 10);
+      const awayScore = parseInt(ev.Tr2 ?? 0, 10);
+      const elapsed = ev.Min ? `${ev.Min}'` : '';
+
+      let isLive = false;
+      let isFinished = false;
+      let badge = '';
+      let statusText = '';
+      let scoreDisplay = `${homeScore} - ${awayScore}`;
+      let detailStatus = 'Chưa diễn ra';
+
+      if (eps === 'FT' || eps === 'AET' || eps === 'AP' || isPastThreeHours) {
+        isFinished = true;
+        isLive = false;
+        badge = (eps === 'NS' && isPastThreeHours) ? '[FT]' : `[FT ${homeScore}-${awayScore}]`;
+        statusText = 'FT';
+        detailStatus = 'Đã kết thúc (FT)';
+      } else if (eps === 'HT') {
+        isLive = true;
+        badge = `[HT ${homeScore}-${awayScore}]`;
+        statusText = 'HT';
+        detailStatus = 'Nghỉ giữa hiệp (HT)';
+      } else if (isCurrentlyLive) {
+        isLive = true;
+        const currentMin = elapsed || (eps.includes('H') ? eps : `${eps}'`);
+        badge = `🔴 [${currentMin} ${homeScore}-${awayScore}]`;
+        statusText = currentMin;
+        detailStatus = `Đang diễn ra (${currentMin})`;
+      } else if (eps === 'NS') {
+        detailStatus = 'Sắp diễn ra';
+      }
+
+      const kickoffTime = timeFormatter.format(kickoff);
+      const kickoffDate = dateFormatter.format(kickoff);
+
+      const homeSlug = homeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const awaySlug = awayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const slug = `${homeSlug}-v-${awaySlug}-${ev.Eid}`;
+
+      const displayName = badge ? `${badge} ${homeName} vs ${awayName}` : `${homeName} vs ${awayName}`;
+
+      const homeImg = ev.T1?.[0]?.Img ? `https://lsm-static-prod.livescore.com/medium/${ev.T1[0].Img}` : '';
+      const awayImg = ev.T2?.[0]?.Img ? `https://lsm-static-prod.livescore.com/medium/${ev.T2[0].Img}` : '';
+      const homeLogo = getTeamBadge(homeName) || homeImg;
+      const awayLogo = getTeamBadge(awayName) || awayImg;
+
+      let description = `${homeName} vs ${awayName}\n`;
+      if (isLive || isFinished) {
+        description += `Tỷ số: ${homeScore} - ${awayScore}\n`;
+        description += `Trạng thái: ${detailStatus}\n`;
+      }
+      description += `Giải đấu: ${item.compTitle}\n`;
+      description += `Giờ đá: ${kickoffTime} - ${kickoffDate}`;
+
+      matches.push({
+        id: `xoiche:${slug}`,
+        type: 'movie',
+        name: displayName,
+        homeName,
+        awayName,
+        description,
+        releaseInfo: kickoffAt,
+        homeLogo,
+        awayLogo,
+        kickoffAt,
+        competition: item.compTitle,
+        competitionSlug: item.compSlug,
+        poster: `${posterBase}/poster/${encodeURIComponent(slug)}.png`,
+        isLive,
+        isFinished,
+        statusText,
+        scoreDisplay
+      });
+    }
+
     return matches;
   } catch (err) {
     console.error('[livescore api error]:', err.message);
@@ -486,7 +537,20 @@ async function refreshMatches(baseUrl) {
       if (liveScoreMatches.length > 0) {
         unique = liveScoreMatches;
       } else if (matchesCache.matches.length > 0 && matchesCache.time > 0) {
-        unique = matchesCache.matches;
+        const now = Date.now();
+        unique = matchesCache.matches.map(m => {
+          const kickoffMs = new Date(m.kickoffAt).getTime();
+          if (m.isLive && (now - kickoffMs > 3 * 3600 * 1000)) {
+            return {
+              ...m,
+              isLive: false,
+              isFinished: true,
+              statusText: 'FT',
+              name: m.name.replace(/^🔴\s*\[[^\]]+\]/, `[FT ${m.scoreDisplay || ''}]`.trim())
+            };
+          }
+          return m;
+        });
       } else {
         unique = INITIAL_FALLBACK_MATCHES.map(m => ({
           ...m,
@@ -571,7 +635,7 @@ builder.defineCatalogHandler(async ({ type, id }) => {
     const filtered = filterMatches(matches);
     const list = filtered.length > 0 ? filtered : filterMatches(INITIAL_FALLBACK_MATCHES);
 
-    // Sắp xếp: Live lên đầu -> Trận sắp đá -> Trận đã xong
+    // Sắp xếp: Live lên đầu -> Trận sắp đá (sớm nhất trước) -> Trận đã xong (mới nhất trước)
     list.sort((a, b) => {
       if (a.isLive && !b.isLive) return -1;
       if (!a.isLive && b.isLive) return 1;
@@ -579,7 +643,10 @@ builder.defineCatalogHandler(async ({ type, id }) => {
       if (!a.isFinished && b.isFinished) return -1;
       if (a.isFinished && !b.isFinished) return 1;
 
-      return new Date(a.kickoffAt) - new Date(b.kickoffAt);
+      if (!a.isFinished && !b.isFinished) {
+        return new Date(a.kickoffAt) - new Date(b.kickoffAt);
+      }
+      return new Date(b.kickoffAt) - new Date(a.kickoffAt);
     });
 
     return { metas: list };
